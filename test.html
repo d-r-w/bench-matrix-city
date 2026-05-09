@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>The Matrix City</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; cursor: pointer; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #loading {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #0f0; font-family: monospace; font-size: 24px; pointer-events: none;
+            text-shadow: 0 0 10px #0f0, 0 0 20px #0f0, 0 0 40px #0a0; z-index: 10;
+            letter-spacing: 4px; animation: pulse 1.5s ease-in-out infinite;
+            background: rgba(0,8,2,0.6); padding: 20px 40px; border: 1px solid #0f03;
+            backdrop-filter: blur(4px);
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        #error {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #f44; font-family: monospace; font-size: 18px; pointer-events: none;
+            text-shadow: 0 0 5px #f44; z-index: 20; display: none;
+            text-align: center; max-width: 80vw;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="loading">[ CONNECTING TO THE MATRIX ]</div>
+    <div id="error"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+
+
+        const GRID = 16;
+        const CELL = 4.2;
+        const BUILDING_WIDTH = 3.6;
+
+
+        let scene, camera, renderer, composer;
+        const clock = new THREE.Clock();
+
+
+        const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' +
+            'アァカサタナハマヤャラワガザダバパイィキシチニヒミリヰギジヂビピ' +
+            'ウゥクスツヌフムユュルグズブヅプエェケセテネヘメレヱゲゼデベペ' +
+            'オォコソトノホモヨョロゴゾドボポヴッン⟨⟩{}[]|/\\+=<>!@#$%&';
+
+
+        const charToIndex = new Map();
+        for (let i = 0; i < CHARS.length; i++) charToIndex.set(CHARS[i], i);
+
+
+        function randChar() { return CHARS[Math.floor(Math.random() * CHARS.length)]; }
+
+
+
+        const ATLAS_COLS = 32;
+        const ATLAS_ROWS = 16;
+        const CELL_SIZE = 128;
+
+
+        const { texture: atlasTex } = buildTextureAtlas();
+
+        function buildTextureAtlas() {
+            const w = ATLAS_COLS * CELL_SIZE;
+            const h = ATLAS_ROWS * CELL_SIZE;
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            const ctx = c.getContext('2d');
+
+
+            ctx.shadowColor = '#00ff41';
+
+            for (let i = 0; i < CHARS.length; i++) {
+                const col = i % ATLAS_COLS;
+                const row = Math.floor(i / ATLAS_COLS);
+
+
+                if (i >= ATLAS_COLS * ATLAS_ROWS) break;
+
+                const x = col * CELL_SIZE + CELL_SIZE / 2;
+                const y = row * CELL_SIZE + CELL_SIZE / 2;
+
+
+                const bright = i < CHARS.length / 2;
+                ctx.shadowBlur = bright ? 8 : 4;
+
+                ctx.fillStyle = bright ? '#55ff77' : '#00dd44';
+                ctx.font = `${CELL_SIZE * 0.7}px monospace`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(CHARS[i], x, y + 4);
+            }
+
+            const tex = new THREE.CanvasTexture(c);
+
+            tex.minFilter = THREE.NearestFilter;
+            tex.magFilter = THREE.NearestFilter;
+
+
+            tex.flipY = false;
+            tex.generateMipmaps = false;
+            return { texture: tex, cols: ATLAS_COLS, rows: ATLAS_ROWS };
+        }
+
+
+        const MAX_CACHE_SIZE = 512;
+        const texCache = new Map();
+
+        function getCharTex(char, opts) {
+            const key = `${char}_${opts.bright ? 'B' : 'N'}_${opts.size || 90}`;
+            if (!texCache.has(key)) {
+                while (texCache.size >= MAX_CACHE_SIZE) {
+                    texCache.delete(texCache.keys().next().value);
+                }
+                texCache.set(key, makeCharTexture(char, opts));
+            }
+            return texCache.get(key);
+        }
+
+        function makeCharTexture(char, opts = {}) {
+            const c = document.createElement('canvas');
+            c.width = 128; c.height = 128;
+            const ctx = c.getContext('2d');
+
+            const grd = ctx.createRadialGradient(64, 64, 5, 64, 64, 55);
+            grd.addColorStop(0, opts.bright ? 'rgba(0,255,65,0.15)' : 'rgba(0,255,65,0.04)');
+            grd.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grd;
+            ctx.fillRect(0, 0, 128, 128);
+
+            ctx.fillStyle = opts.bright ? '#55ff77' : '#00dd44';
+            ctx.shadowColor = '#00ff41';
+            ctx.shadowBlur = opts.bright ? 20 : 8;
+            ctx.font = `${opts.size || 90}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(char, 64, 68);
+
+            const tex = new THREE.CanvasTexture(c);
+            tex.minFilter = THREE.NearestFilter;
+            tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000802, 0.01);
+        scene.background = new THREE.Color(0x000301);
+
+            camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 400);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+            renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+            renderer.setSize(innerWidth, innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 0.9;
+
+            const rp = new RenderPass(scene, camera);
+            composer = new EffectComposer(renderer);
+
+            const bloom = new UnrealBloomPass(
+                new THREE.Vector2(innerWidth, innerHeight), 0.1, 0.5, 1.4
+            );
+            composer.addPass(rp);
+            composer.addPass(bloom);
+
+            // Vignette + color grading pass
+            const vignetteShader = {
+                uniforms: {
+                    tDiffuse: { value: null },
+                    darkness: { value: 2.0 },
+                    offset: { value: 1.4 }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D tDiffuse;
+                    uniform float darkness;
+                    uniform float offset;
+                    varying vec2 vUv;
+                    void main() {
+                        vec4 texel = texture2D(tDiffuse, vUv);
+                        vec2 uv = (vUv - 0.5) * 2.0;
+                        float vig = clamp(offset - dot(uv, uv) * darkness * 0.35, 0.0, 1.0);
+                        vec3 shadowTint = mix(vec3(0.0, 0.08, 0.02), vec3(1.0), vig);
+                        texel.rgb *= shadowTint;
+                        // Slight green tint + contrast curve
+                        vec3 graded = texel.rgb * vec3(0.95, 1.05, 0.9);
+                        graded = pow(graded, vec3(1.05));
+                        texel.rgb = graded;
+                        gl_FragColor = texel;
+                    }
+                `
+            };
+            const vignettePass = new ShaderPass(vignetteShader);
+            composer.addPass(vignettePass);
+
+            buildCity();
+            buildGroundGrid();
+            buildRain();
+            buildHazeLayers();
+            buildLightBeams();
+            buildStarfield();
+
+            document.getElementById('loading').style.display = 'none';
+            setTimeout(startDroneFlythrough, 600);
+
+            addEventListener('resize', onResize);
+        }
+
+
+        const buildingHeights = [];
+
+        function buildCity() {
+            const half = Math.floor(GRID / 2);
+
+
+            const positions = [];
+            const charIndices = [];
+            const brightFlags = [];
+
+            for (let gx = -half; gx <= half; gx++) {
+                for (let gz = -half; gz <= half; gz++) {
+                    const dist = Math.sqrt(gx * gx + gz * gz);
+
+                    let maxH = Math.max(5, 48 - dist * 1.5);
+                    maxH += (Math.random() - 0.5) * 12;
+                    // Create landmark skyscrapers near center
+                    if (dist < 4 && Math.random() > 0.5) maxH = Math.floor(maxH * 1.6);
+                    maxH = Math.floor(maxH);
+
+                    const bx = gx * CELL;
+                    const bz = gz * CELL;
+
+                    buildingHeights.push({ x: bx, z: bz, h: maxH });
+
+
+                    // Skip grid cells to create streets — denser in center, sparser at edges
+                    const isStreetX = Math.abs(gx) % 3 === 0;
+                    const isStreetZ = Math.abs(gz) % 3 === 0;
+                    if (isStreetX || isStreetZ) {
+                        continue;
+                    }
+
+                    // Randomly leave blocks empty for open plazas / parks — more density near center
+                    const fillChance = Math.max(0.35, 0.7 - dist * 0.04);
+                    if (Math.random() > fillChance) {
+                        continue;
+                    }
+
+                    const hw = BUILDING_WIDTH / 2;
+
+                    const faceDefs = [
+                        { axis: 'x', sign: -1 },
+                        { axis: 'x', sign: 1 },
+                        { axis: 'z', sign: -1 },
+                        { axis: 'z', sign: 1 },
+                    ];
+
+                    const charSpacing = Math.max(0.3, 0.28 + dist * 0.01);
+
+                    for (const face of faceDefs) {
+                        const charsOnEdge = Math.floor((hw * 2) / charSpacing);
+
+                        for (let i = 0; i < charsOnEdge; i++) {
+                            const pos = (i - charsOnEdge / 2 + 0.5) * charSpacing;
+
+                            // Tighter vertical spacing — every row or skip 1 for tall buildings
+                            const floorSkip = dist < 6 ? 1 : (dist < 10 ? 2 : 3);
+                            for (let h = 1; h <= maxH; h += floorSkip) {
+                                // Randomly skip some positions for a more organic look
+                                if (Math.random() < 0.12) continue;
+
+                                const ch = randChar();
+
+                                const charIdx = charToIndex.get(ch);
+                                if (charIdx < 0) continue;
+
+                                // Emulate shadows by darkening glyphs based on face orientation and height
+                                let shadow = 1.0;
+                                if (face.sign === -1) shadow *= 0.6; // Back/left faces darker
+                                if (h < maxH * 0.2) shadow *= 0.7; // Lower floors slightly darker
+                                const bright = Math.random() > 0.6 ? shadow : shadow * 0.45;
+
+                                let px, pz;
+                                if (face.axis === 'x') {
+                                    px = bx + pos;
+                                    pz = bz + face.sign * hw;
+                                } else {
+                                    px = bx + face.sign * hw;
+                                    pz = bz + pos;
+                                }
+
+                                positions.push(px, h * 0.32, pz);
+                                charIndices.push(charIdx);
+                                brightFlags.push(bright);
+                            }
+                        }
+                    }
+
+
+                    const roofY = maxH * 0.32;
+                    const charsOnEdge2 = Math.floor((hw * 2) / charSpacing);
+
+                    for (let i = 0; i < charsOnEdge2; i++) {
+                        const pos = (i - charsOnEdge2 / 2 + 0.5) * charSpacing;
+
+                        for (const sign of [-1, 1]) {
+                            const ch = randChar();
+                            const charIdx = charToIndex.get(ch);
+                            if (charIdx < 0) continue;
+
+                            positions.push(bx + pos, roofY, bz + sign * hw);
+                            charIndices.push(charIdx);
+                            brightFlags.push(1.0);
+                        }
+
+                        for (const sign of [-1, 1]) {
+                            const ch = randChar();
+                            const charIdx = charToIndex.get(ch);
+                            if (charIdx < 0) continue;
+
+                            positions.push(bx + sign * hw, roofY, bz + pos);
+                            charIndices.push(charIdx);
+                            brightFlags.push(1.0);
+                        }
+                    }
+                }
+            }
+
+            const totalChars = positions.length / 3;
+
+
+            const uvOffsets = new Float32Array(totalChars * 2);
+
+            for (let i = 0; i < totalChars; i++) {
+                const charIdx = charIndices[i];
+                const col = charIdx % ATLAS_COLS;
+                const row = Math.floor(charIdx / ATLAS_ROWS);
+
+                uvOffsets[i * 2]       = col / ATLAS_COLS;
+
+                uvOffsets[i * 2 + 1]   = row / ATLAS_ROWS;
+            }
+
+
+            const geo = new THREE.PlaneGeometry(1, 1);
+
+
+            const instancePositions = new Float32Array(totalChars * 3);
+            const instanceScales = new Float32Array(totalChars * 2);
+
+            for (let i = 0; i < totalChars; i++) {
+                instancePositions[i * 3]     = positions[i * 3];
+                instancePositions[i * 3 + 1] = positions[i * 3 + 1];
+                instancePositions[i * 3 + 2] = positions[i * 3 + 2];
+                instanceScales[i * 2]   = 0.45;
+                instanceScales[i * 2 + 1] = 0.38;
+            }
+
+
+            const mat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uAtlas: { value: atlasTex },
+                    uTime: { value: 0 }
+                },
+                vertexShader: `
+                    attribute vec3 instancePosition;
+                    attribute vec2 instanceScale;
+                    attribute vec2 instanceUVOffset;
+                    attribute float instanceBright;
+                    attribute float instanceAlpha;
+
+                    varying vec2 vUv;
+                    varying float vBright;
+                    varying float vAlpha;
+
+                    void main() {
+
+                        vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+                        vec3 up   = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+
+
+                        vec3 worldPos = instancePosition + (position.x * instanceScale.x) * right + (position.y * instanceScale.y) * up;
+
+
+                        vUv = uv * vec2(1.0/${ATLAS_COLS}.0, 1.0/${ATLAS_ROWS}.0) + instanceUVOffset;
+                        vBright = instanceBright;
+                        vAlpha  = instanceAlpha;
+
+                        gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D uAtlas;
+                    uniform float uTime;
+                    varying vec2 vUv;
+                    varying float vBright;
+                    varying float vAlpha;
+
+                    void main() {
+                        vec4 texel = texture(uAtlas, vUv);
+
+                        float charAlpha = max(texel.r, max(texel.g, texel.b));
+                        // Dynamic scanline & flicker effect
+                        float scanline = 0.85 + 0.15 * sin(vUv.y * 150.0 + uTime * 5.0);
+                        float flicker = 0.92 + 0.08 * sin(uTime * 3.0 + vUv.x * 50.0);
+
+                        // Use the atlas texture's own green colors, modulated by brightness
+                        vec3 col = texel.rgb * vBright;
+
+                        float finalAlpha = charAlpha * vBright * vAlpha * scanline * flicker;
+                        if (finalAlpha < 0.01) discard;
+
+                        gl_FragColor = vec4(col, finalAlpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+            });
+
+            const instancedMesh = new THREE.InstancedMesh(geo, mat, totalChars);
+            instancedMesh.frustumCulled = false;
+
+
+            const posAttr = new THREE.InstancedBufferAttribute(instancePositions, 3);
+            instancedMesh.geometry.setAttribute('instancePosition', posAttr);
+
+            const scaleAttr = new THREE.InstancedBufferAttribute(instanceScales, 2);
+            instancedMesh.geometry.setAttribute('instanceScale', scaleAttr);
+
+
+            const uvOffsetAttr = new THREE.InstancedBufferAttribute(uvOffsets, 2);
+            instancedMesh.geometry.setAttribute('instanceUVOffset', uvOffsetAttr);
+
+
+            const brightAttr = new THREE.InstancedBufferAttribute(new Float32Array(brightFlags), 1);
+            instancedMesh.geometry.setAttribute('instanceBright', brightAttr);
+
+
+            const alphas = new Float32Array(totalChars).fill(1.0);
+            const alphaAttr = new THREE.InstancedBufferAttribute(alphas, 1);
+            instancedMesh.geometry.setAttribute('instanceAlpha', alphaAttr);
+
+
+            instancedMesh.userData.positions = instancePositions;
+            instancedMesh.userData.scales = instanceScales;
+            instancedMesh.userData.alphas = alphas;
+
+
+            const dummy = new THREE.Object3D();
+            for (let i = 0; i < totalChars; i++) {
+                dummy.position.set(0, 0, 0);
+                dummy.scale.set(1, 1, 1);
+                dummy.updateMatrix();
+                instancedMesh.setMatrixAt(i, dummy.matrix);
+            }
+
+
+            const charIndexArray = new Uint16Array(charIndices);
+
+            instancedMesh.instanceMatrix.needsUpdate = true;
+            scene.add(instancedMesh);
+
+
+            window._matrixInstancedMesh = instancedMesh;
+
+            // Flying vehicles (light trails)
+            const vehicleCount = 20;
+            for (let i = 0; i < vehicleCount; i++) {
+                const r = Math.random();
+                let vColor;
+                if (r > 0.7) vColor = 0x44ffdd;
+                else if (r > 0.5) vColor = 0xffaa33;
+                else vColor = 0x55ff77;
+                const vMat = new THREE.MeshBasicMaterial({
+                    color: vColor,
+                    transparent: true,
+                    opacity: 0.6,
+                });
+                const vGeo = new THREE.SphereGeometry(0.12, 4, 3);
+                const vehicle = new THREE.Mesh(vGeo, vMat);
+
+                // Pick a random avenue to fly along
+                const axis = Math.random() > 0.5 ? 'x' : 'z';
+                const aveIdx = Math.floor((Math.random() * 2 - 1) * (GRID / 3));
+                const avePos = aveIdx * 3 * CELL;
+
+                vehicle.position.set(
+                    axis === 'x' ? (Math.random() - 0.5) * GRID * CELL : avePos,
+                    8 + Math.random() * 30,
+                    axis === 'z' ? (Math.random() - 0.5) * GRID * CELL : avePos
+                );
+
+                vehicle.userData.flyAxis = axis;
+                vehicle.userData.flySpeed = 3 + Math.random() * 5;
+                vehicle.userData.flyDir = Math.random() > 0.5 ? 1 : -1;
+                vehicle.userData.flyY = vehicle.position.y;
+
+                // Trail behind the vehicle
+                const trailGeo = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(0, 0, 0),
+                    new THREE.Vector3(axis === 'x' ? -2 : 0, 0, axis === 'z' ? -2 : 0),
+                ]);
+                const trailMat = new THREE.LineBasicMaterial({
+                    color: vColor,
+                    transparent: true,
+                    opacity: 0.2,
+                });
+                const trail = new THREE.Line(trailGeo, trailMat);
+                vehicle.add(trail);
+
+                scene.add(vehicle);
+            }
+            window._vehicles = scene.children.filter(c => c.userData.flyAxis !== undefined);
+
+
+            const refreshRates = new Float32Array(totalChars).map(() => 0.8 + Math.random() * 2.5);
+            instancedMesh.userData = {
+                uvOffsets,
+                scales: instanceScales,
+                alphas,
+                charIndices: charIndexArray,
+                refreshRates,
+                nextRefresh: new Float32Array(totalChars).fill(0),
+                lastRefreshTime: new Float32Array(totalChars).fill(0),
+                decayRates: new Float32Array(totalChars).map(() => 1.5 + Math.random() * 3.0),
+            };
+        }
+
+
+        function buildGroundGrid() {
+            const size = GRID * CELL;
+
+
+            // Simplified ground grid — sparse, subtle lines only
+            const groundGeo = new THREE.PlaneGeometry(size * 2.5, size * 2.5);
+            const groundMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uColor: { value: new THREE.Color(0x00ff41) },
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform vec3 uColor;
+                    varying vec2 vUv;
+
+                    void main() {
+                        // Sparse grid — only major lines every ~20 cells worth of UV
+                        vec2 grid = abs(fract(vUv * 20.0 - 0.5) - 0.5);
+                        float line = min(grid.x, grid.y);
+                        float gridAlpha = 1.0 - smoothstep(0.0, 0.04, line);
+
+                        // Subtle animated pulse along grid lines
+                        float stream = abs(fract(vUv.x * 5.0 + uTime * 0.3) - 0.5);
+                        float streamAlpha = (1.0 - smoothstep(0.0, 0.08, stream)) * 0.3;
+
+                        float dist = distance(vUv, vec2(0.5));
+                        float fade = 1.0 - smoothstep(0.2, 0.5, dist);
+
+                        float totalAlpha = (gridAlpha * fade + streamAlpha) * 0.25;
+                        gl_FragColor = vec4(uColor, totalAlpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide
+            });
+            const groundPlane = new THREE.Mesh(groundGeo, groundMat);
+            groundPlane.rotation.x = -Math.PI / 2;
+            groundPlane.position.y = 0.01;
+            scene.add(groundPlane);
+
+
+            window._groundPlane = groundPlane;
+
+
+            // Only draw avenue edges (every 3rd cell) — no street-level lines, no center dashes
+            const isAvenue = (i) => Math.abs(i) % 3 === 0;
+            const avenueEdgeMat = new THREE.LineBasicMaterial({ color: 0x22ff66, transparent: true, opacity: 0.3 });
+
+            for (let i = -GRID; i <= GRID; i++) {
+                if (!isAvenue(i)) continue;
+                const pos = i * CELL;
+
+                for (const sign of [-1, 1]) {
+                    const zOff = pos + sign * CELL * 0.42;
+                    scene.add(new THREE.Line(
+                        new THREE.BufferGeometry().setFromPoints([
+                            new THREE.Vector3(-size, 0.04, zOff),
+                            new THREE.Vector3(size, 0.04, zOff),
+                        ]), avenueEdgeMat
+                    ));
+                }
+
+                for (const sign of [-1, 1]) {
+                    const xOff = pos + sign * CELL * 0.42;
+                    scene.add(new THREE.Line(
+                        new THREE.BufferGeometry().setFromPoints([
+                            new THREE.Vector3(xOff, 0.04, -size),
+                            new THREE.Vector3(xOff, 0.04, size),
+                        ]), avenueEdgeMat
+                    ));
+                }
+            }
+
+
+            // Sparse data stream chars along avenues only — reduced count and opacity
+            const streamChars = 150;
+            for (let i = 0; i < streamChars; i++) {
+                const ch = randChar();
+                const tex = getCharTex(ch, { bright: Math.random() > 0.7, size: 50 });
+                const mat = new THREE.SpriteMaterial({
+                    map: tex, transparent: true, opacity: 0.25 + Math.random() * 0.15,
+                    depthWrite: false
+                });
+                const sprite = new THREE.Sprite(mat);
+                sprite.scale.set(0.5, 0.6, 1);
+
+                const aveIndex = Math.floor((Math.random() * 2 - 1) * ((GRID / 3) | 0));
+                const avePos = aveIndex * 3 * CELL;
+
+                if (Math.random() > 0.5) {
+                    sprite.position.set((Math.random() - 0.5) * size * 2, 0.1, avePos);
+                } else {
+                    sprite.position.set(avePos, 0.1, (Math.random() - 0.5) * size * 2);
+                }
+
+                sprite.userData.streamSpeed = 0.5 + Math.random() * 1.5;
+                sprite.userData.streamDir = Math.random() > 0.5 ? 1 : -1;
+                sprite.userData.streamAxis = Math.random() > 0.5 ? 'x' : 'z';
+                scene.add(sprite);
+            }
+
+
+            window._streamSprites = scene.children.filter(c => c.userData.streamSpeed);
+        }
+
+
+        function buildRain() {
+            const count = 6000;
+            const geo = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const velocities = new Float32Array(count);
+
+            for (let i = 0; i < count; i++) {
+                positions[i * 3]     = (Math.random() - 0.5) * GRID * CELL * 4;
+                positions[i * 3 + 1] = Math.random() * 150;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * GRID * CELL * 4;
+                velocities[i] = 0.8 + Math.random() * 1.5;
+            }
+
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geo.setAttribute('velocity', new THREE.BufferAttribute(velocities, 1));
+
+            const mat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uColor: { value: new THREE.Color(0x00ff41) }
+                },
+                vertexShader: `
+                    attribute float velocity;
+                    varying float vAlpha;
+                    void main() {
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        gl_PointSize = (120.0 / -mvPosition.z) * velocity;
+                        gl_Position = projectionMatrix * mvPosition;
+                        vAlpha = smoothstep(120.0, 20.0, -mvPosition.z);
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 uColor;
+                    varying float vAlpha;
+                    void main() {
+                        // Create a vertical streak shape for digital rain effect
+                        vec2 center = gl_PointCoord - 0.5;
+                        float dist = abs(center.x);
+                        // Sharper, longer streaks with trailing fade
+                        float streak = smoothstep(0.45, 0.1, dist) * (1.0 - abs(center.y));
+                        float trail = smoothstep(0.5, 0.0, center.y) * 0.6;
+                        float alpha = (streak + trail) * vAlpha * 0.2;
+                        if (alpha < 0.01) discard;
+
+                        // Brighter core, softer edges
+                        vec3 col = mix(uColor * 0.4, uColor * 1.0, streak);
+                        gl_FragColor = vec4(col, alpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            const rain = new THREE.Points(geo, mat);
+            scene.add(rain);
+            window._rain = rain;
+        }
+
+
+        function buildHazeLayers() {
+            for (let layer = 0; layer < 3; layer++) {
+                const hazeGeo = new THREE.PlaneGeometry(GRID * CELL * 3, GRID * CELL * 3);
+                const hazeMat = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 },
+                        uLayer: { value: layer },
+                    },
+                    vertexShader: `
+                        varying vec2 vUv;
+                        void main() {
+                            vUv = uv;
+                            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                        }
+                    `,
+                    fragmentShader: `
+                        uniform float uTime;
+                        uniform float uLayer;
+                        varying vec2 vUv;
+
+                        // Simplex-like noise
+                        float hash(vec2 p) {
+                            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                        }
+                        float noise(vec2 p) {
+                            vec2 i = floor(p);
+                            vec2 f = fract(p);
+                            f = f * f * (3.0 - 2.0 * f);
+                            return mix(
+                                mix(hash(i), hash(i + vec2(1,0)), f.x),
+                                mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x),
+                                f.y
+                            );
+                        }
+
+                        void main() {
+                            vec2 uv = vUv * 3.0;
+                            float n = noise(uv + uTime * (0.1 + uLayer * 0.05));
+                            float n2 = noise(uv * 2.0 - uTime * (0.15 + uLayer * 0.03));
+                            float haze = n * n2;
+
+                            vec2 centerDist = abs(vUv - 0.5) * 2.0;
+                            float fade = 1.0 - smoothstep(0.3, 0.7, max(centerDist.x, centerDist.y));
+
+                            float alpha = haze * fade * (0.015 + uLayer * 0.008);
+                            vec3 col = mix(vec3(0.0, 0.8, 0.2), vec3(0.15, 0.9, 0.6), n);
+                            gl_FragColor = vec4(col, alpha);
+                        }
+                    `,
+                    transparent: true,
+                    depthWrite: false,
+                    side: THREE.DoubleSide,
+                    blending: THREE.AdditiveBlending,
+                });
+                const haze = new THREE.Mesh(hazeGeo, hazeMat);
+                haze.position.y = 5 + layer * 12;
+                scene.add(haze);
+            }
+            window._hazeLayers = scene.children.filter(c => c.material && c.material.uniforms && c.material.uniforms.uLayer);
+        }
+
+        function buildStarfield() {
+            const count = 800;
+            const geo = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+
+            for (let i = 0; i < count; i++) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(Math.random());
+                const r = 150 + Math.random() * 100;
+                positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = r * Math.cos(phi) * 0.5 + 20;
+                positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+
+                const isGreen = Math.random() > 0.3;
+                colors[i * 3] = isGreen ? 0.1 : 0.5;
+                colors[i * 3 + 1] = isGreen ? 0.8 : 0.5;
+                colors[i * 3 + 2] = isGreen ? 0.2 : 0.5;
+            }
+
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const mat = new THREE.PointsMaterial({
+                size: 0.8,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.35,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+
+            const stars = new THREE.Points(geo, mat);
+            scene.add(stars);
+        }
+
+        function buildLightBeams() {
+            const beamGeo = new THREE.CylinderGeometry(0.08, 0.6, 100, 8, 1, true);
+            const beamMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uColor: { value: new THREE.Color(0x00ff41) }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform vec3 uColor;
+                    varying vec2 vUv;
+                    void main() {
+                        float alpha = (1.0 - vUv.y) * 0.08;
+                        // Volumetric light falloff from center
+                        float radial = 1.0 - abs(vUv.x - 0.5) * 2.0;
+                        radial = smoothstep(0.0, 1.0, radial);
+
+                        float pulse = 0.7 + 0.3 * sin(uTime * 2.0 + vUv.y * 10.0);
+                        float flicker = 0.85 + 0.15 * sin(uTime * 7.0 + vUv.y * 20.0);
+
+                        alpha *= radial * pulse * flicker;
+                        gl_FragColor = vec4(uColor, alpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending
+            });
+
+            const isAvenue = (i) => Math.abs(i) % 6 === 0;
+            const beams = [];
+
+            for (let ix = -GRID; ix <= GRID; ix++) {
+                for (let iz = -GRID; iz <= GRID; iz++) {
+                    if (isAvenue(ix) && isAvenue(iz)) {
+                        // Only place a beam ~40% of the time for sparser distribution
+                        if (Math.random() > 0.4) continue;
+                        const mat = beamMat.clone();
+                        mat.uniforms.uTime.value = Math.random() * 10;
+                        const beam = new THREE.Mesh(beamGeo, mat);
+                        beam.position.set(ix * CELL, 35, iz * CELL);
+                        scene.add(beam);
+                        beams.push(beam);
+                    }
+                }
+            }
+            window._lightBeams = beams;
+        }
+
+        function startDroneFlythrough() {
+            const waypoints = [];
+            
+            // Generate a smooth, continuous looping path using sine waves
+            const numPoints = 128;
+            for (let i = 0; i <= numPoints; i++) {
+                const t = (i / numPoints) * Math.PI * 2;
+                
+                // Figure-8 path for smooth, predictable direction changes
+                const half = Math.floor(GRID / 2);
+                const cx = Math.sin(t) * (half * CELL * 0.85);
+                const cz = Math.sin(t * 2) * (half * CELL * 0.75);
+                const h = 8 + Math.sin(t * 4) * 2; // Gentle height variation
+                
+                waypoints.push(new THREE.Vector3(cx, h, cz));
+            }
+
+            const curve = new THREE.CatmullRomCurve3(waypoints, true);
+            let t = 0;
+            const baseSpeed = 0.00015;
+
+            function fly() {
+                t = (t + baseSpeed) % 1;
+
+                const pos = curve.getPointAt(t);
+                camera.position.copy(pos);
+
+                // Look ahead for smooth turning
+                const lookT = (t + 0.015) % 1;
+                camera.lookAt(curve.getPointAt(lookT));
+
+                // Calculate banking based on curve curvature
+                const p1 = curve.getPointAt(t);
+                const p2 = curve.getPointAt((t + 0.01) % 1);
+                const p3 = curve.getPointAt((t + 0.02) % 1);
+                const v1 = new THREE.Vector3().subVectors(p2, p1).normalize();
+                const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
+                const cross = new THREE.Vector3().crossVectors(v1, v2);
+                
+                // Gentle bank angle based on turn direction and magnitude
+                let bankAngle = cross.y * 0.4;
+                bankAngle = Math.max(-0.25, Math.min(0.25, bankAngle));
+                
+                // Apply roll around local Z axis (view direction) safely each frame
+                camera.rotateZ(bankAngle);
+
+                requestAnimationFrame(fly);
+            }
+            fly();
+        }
+
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = clock.getDelta();
+            const t = clock.getElapsedTime();
+            const mesh = window._matrixInstancedMesh;
+
+            if (mesh) {
+                const ud = mesh.userData;
+                const alphas = ud.alphas;
+                const scales = ud.scales;
+                const uvOffsets = ud.uvOffsets;
+                const charIndices = ud.charIndices;
+
+                for (let i = 0; i < mesh.count; i++) {
+
+                    if (t >= ud.nextRefresh[i]) {
+                        const newCharIdx = Math.floor(Math.random() * CHARS.length);
+                        charIndices[i] = newCharIdx;
+
+
+                        const col = newCharIdx % ATLAS_COLS;
+                        const row = Math.floor(newCharIdx / ATLAS_COLS);
+                        uvOffsets[i * 2]       = col / ATLAS_COLS;
+                        uvOffsets[i * 2 + 1]   = row / ATLAS_ROWS;
+
+
+                        ud.nextRefresh[i] = t + ud.refreshRates[i];
+
+
+                        alphas[i] = 1.0;
+                        ud.lastRefreshTime[i] = t;
+                    }
+
+
+                    const i2 = i * 2;
+                    if (alphas[i] > 0.01) {
+                        const elapsed = t - ud.lastRefreshTime[i];
+                        alphas[i] = Math.max(0.01, 1.0 - elapsed / ud.decayRates[i]);
+
+                        const baseScaleX = 0.45;
+                        const baseScaleY = 0.38;
+                        scales[i2]     = baseScaleX;
+                        scales[i2 + 1] = baseScaleY;
+                    }
+                }
+
+
+                mesh.geometry.attributes.instanceUVOffset.needsUpdate = true;
+                mesh.geometry.attributes.instanceScale.needsUpdate = true;
+                mesh.geometry.attributes.instanceAlpha.needsUpdate = true;
+                mesh.material.uniforms.uTime.value = t;
+            }
+
+
+            if (window._groundPlane) {
+                window._groundPlane.material.uniforms.uTime.value = t;
+            }
+
+            if (window._rain) {
+                window._rain.material.uniforms.uTime.value = t;
+                const pos = window._rain.geometry.attributes.position;
+                const vel = window._rain.geometry.attributes.velocity;
+                for (let i = 0; i < pos.count; i++) {
+                    let y = pos.array[i * 3 + 1];
+                    y -= vel.array[i] * dt * 14;
+                    if (y < -5) y = 120;
+                    pos.array[i * 3 + 1] = y;
+                }
+                pos.needsUpdate = true;
+            }
+
+            if (window._lightBeams) {
+                for (const beam of window._lightBeams) {
+                    beam.material.uniforms.uTime.value = t;
+                    // Subtle rotation and height pulse for dynamic atmosphere
+                    beam.rotation.y += dt * 0.04;
+                    beam.position.y = 40 + Math.sin(t * 0.3 + beam.id) * 2;
+                }
+            }
+
+            // Animate haze layers
+            if (window._hazeLayers) {
+                for (const haze of window._hazeLayers) {
+                    haze.material.uniforms.uTime.value = t;
+                }
+            }
+
+            // Animate flying vehicles
+            if (window._vehicles) {
+                const citySize = GRID * CELL;
+                for (const v of window._vehicles) {
+                    const move = v.userData.flySpeed * v.userData.flyDir * dt;
+                    if (v.userData.flyAxis === 'x') {
+                        v.position.x += move;
+                        if (Math.abs(v.position.x) > citySize) {
+                            v.position.x = -Math.sign(v.position.x) * (citySize - 1);
+                            v.userData.flyY = 8 + Math.random() * 30;
+                        }
+                    } else {
+                        v.position.z += move;
+                        if (Math.abs(v.position.z) > citySize) {
+                            v.position.z = -Math.sign(v.position.z) * (citySize - 1);
+                            v.userData.flyY = 8 + Math.random() * 30;
+                        }
+                    }
+                    // Smooth altitude changes
+                    v.position.y += (v.userData.flyY - v.position.y) * dt * 0.5;
+                    // Subtle bob
+                    v.position.y += Math.sin(t * 2 + v.id) * 0.01;
+                }
+            }
+
+
+            const streams = window._streamSprites;
+            if (streams) {
+                const size = GRID * CELL;
+                for (const s of streams) {
+                    if (!s.userData.streamSpeed) continue;
+
+                    const move = s.userData.streamSpeed * s.userData.streamDir * dt * 10;
+                    if (s.userData.streamAxis === 'x') {
+                        s.position.x += move;
+                        if (Math.abs(s.position.x) > size) {
+                            s.position.x = -Math.sign(s.position.x) * (size - 1);
+                        }
+                    } else {
+                        s.position.z += move;
+                        if (Math.abs(s.position.z) > size) {
+                            s.position.z = -Math.sign(s.position.z) * (size - 1);
+                        }
+                    }
+
+
+                    s.position.y = 0.06 + Math.sin(t * 2 + s.position.x * 0.15) * 0.02;
+                    const pulse = Math.sin(t * 2 + s.position.x * 0.1);
+                    s.material.opacity = 0.3 + pulse * 0.1;
+
+
+                    if (Math.random() < 0.003) {
+                        const ch = randChar();
+                        s.material.map = getCharTex(ch, { bright: Math.random() > 0.6, size: 50 });
+                    }
+                }
+            }
+
+            composer.render();
+        }
+
+
+        function onResize() {
+            camera.aspect = innerWidth / innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(innerWidth, innerHeight);
+            composer.setSize(innerWidth, innerHeight);
+        }
+
+
+        try {
+            init();
+            animate();
+        } catch (e) {
+            const loading = document.getElementById('loading');
+            loading.style.display = 'none';
+            const errorEl = document.getElementById('error');
+            errorEl.textContent = `ERROR: ${e.message}`;
+            errorEl.style.display = 'block';
+            console.error('Matrix City initialization failed:', e);
+        }
+
+    </script>
+
+    <!-- Picture-in-Picture YouTube Embeds -->
+    <style>
+        .pip-container {
+            position: fixed;
+            width: 360px;
+            height: 270px;
+            background: #111;
+            border: 1px solid #0f03;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.15), 0 4px 20px rgba(0, 0, 0, 0.6);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            border-radius: 6px;
+            overflow: hidden;
+            transition: box-shadow 0.2s;
+        }
+        .pip-container:hover {
+            box-shadow: 0 0 25px rgba(0, 255, 0, 0.3), 0 4px 25px rgba(0, 0, 0, 0.7);
+        }
+        .pip-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            background: linear-gradient(180deg, #1a1a1a 0%, #111 100%);
+            cursor: grab;
+            user-select: none;
+            border-bottom: 1px solid #0f02;
+        }
+        .pip-header:active { cursor: grabbing; }
+        .pip-title {
+            color: #0f0;
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 1px;
+        }
+        .pip-controls {
+            display: flex;
+            gap: 4px;
+        }
+        .pip-btn {
+            background: #0f02;
+            border: 1px solid #0f04;
+            color: #0f0;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 12px;
+            transition: all 0.15s;
+        }
+        .pip-btn:hover {
+            background: #0f04;
+            border-color: #0f08;
+        }
+        .pip-btn.close:hover {
+            background: #f443;
+            border-color: #f448;
+            color: #f44;
+        }
+        .pip-iframe-wrapper {
+            flex: 1;
+            position: relative;
+        }
+        .pip-iframe-wrapper iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .pip-iframe-wrapper::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 1;
+            background:
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 255, 0, 0.03) 2px,
+                    rgba(0, 255, 0, 0.03) 4px
+                ),
+                repeating-linear-gradient(
+                    90deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 255, 0, 0.01) 2px,
+                    rgba(0, 255, 0, 0.01) 4px
+                );
+            background-size: 100% 4px, 4px 100%;
+            mix-blend-mode: screen;
+        }
+        .pip-iframe-wrapper::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 1;
+            background: radial-gradient(
+                ellipse at center,
+                transparent 60%,
+                rgba(0, 15, 0, 0.25) 100%
+            );
+        }
+        .pip-resize-handle {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 16px;
+            height: 16px;
+            cursor: nwse-resize;
+            z-index: 2;
+        }
+        .pip-resize-handle::before,
+        .pip-resize-handle::after {
+            content: '';
+            position: absolute;
+            background: #0f06;
+        }
+        .pip-resize-handle::before {
+            bottom: 4px; right: 2px;
+            width: 10px; height: 2px;
+        }
+        .pip-resize-handle::after {
+            bottom: 2px; right: 4px;
+            width: 2px; height: 10px;
+        }
+        .pip-container.minimized {
+            height: auto !important;
+        }
+        .pip-container.minimized .pip-iframe-wrapper {
+            display: none;
+        }
+    </style>
+
+    <div class="pip-container" style="bottom: 20px; right: 20px;">
+        <div class="pip-header">
+            <span class="pip-title">▶ MATRIX FEED 1</span>
+            <div class="pip-controls">
+                <button class="pip-btn pip-toggle" title="Minimize/Restore">−</button>
+                <button class="pip-btn pip-close close" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="pip-iframe-wrapper">
+            <iframe
+                src="https://www.youtube.com/embed/iEpJwprxDdk?si=VVgydc8Lh-uZQnk1&controls=1"
+                title="YouTube video player"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerpolicy="strict-origin-when-cross-origin"
+                allowfullscreen
+            ></iframe>
+            <div class="pip-resize-handle"></div>
+        </div>
+    </div>
+
+    <div class="pip-container" style="bottom: 20px; right: 400px;">
+        <div class="pip-header">
+            <span class="pip-title">▶ MATRIX FEED 2</span>
+            <div class="pip-controls">
+                <button class="pip-btn pip-toggle" title="Minimize/Restore">−</button>
+                <button class="pip-btn pip-close close" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="pip-iframe-wrapper">
+            <iframe
+                src="https://www.youtube.com/embed/dzylsC0KcOE?si=rKbjFsFWMpyc_ACT&controls=1"
+                title="YouTube video player"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerpolicy="strict-origin-when-cross-origin"
+                allowfullscreen
+            ></iframe>
+            <div class="pip-resize-handle"></div>
+        </div>
+    </div>
+
+    <script>
+        (() => {
+            const MIN_W = 200, MIN_H = 150;
+
+            document.querySelectorAll('.pip-container').forEach(container => {
+                const header = container.querySelector('.pip-header');
+                const resizeHandle = container.querySelector('.pip-resize-handle');
+                const toggleBtn = container.querySelector('.pip-toggle');
+                const closeBtn = container.querySelector('.pip-close');
+
+                // --- Dragging ---
+                header.addEventListener('mousedown', e => {
+                    if (e.target.closest('.pip-btn')) return;
+                    header._dragging = true;
+                    header._dragX = e.clientX - container.offsetLeft;
+                    header._dragY = e.clientY - container.offsetTop;
+                    container.style.transition = 'none';
+                    // Bring to front
+                    document.querySelectorAll('.pip-container').forEach(c => c.style.zIndex = '100');
+                    container.style.zIndex = '200';
+                });
+
+                // --- Resizing ---
+                resizeHandle.addEventListener('mousedown', e => {
+                    resizeHandle._resizing = true;
+                    resizeHandle._rx = e.clientX;
+                    resizeHandle._ry = e.clientY;
+                    resizeHandle._sw = container.offsetWidth;
+                    resizeHandle._sh = container.offsetHeight;
+                    e.preventDefault();
+                });
+
+                // --- Minimize / Restore ---
+                toggleBtn.addEventListener('click', () => {
+                    if (container.classList.contains('minimized')) {
+                        container.classList.remove('minimized');
+                        toggleBtn.textContent = '−';
+                    } else {
+                        container.classList.add('minimized');
+                        toggleBtn.textContent = '+';
+                    }
+                });
+
+                // --- Close ---
+                closeBtn.addEventListener('click', () => {
+                    container.style.display = 'none';
+                });
+            });
+
+            // Shared mouse move/up handlers for all containers
+            document.addEventListener('mousemove', e => {
+                document.querySelectorAll('.pip-container').forEach(container => {
+                    const header = container.querySelector('.pip-header');
+                    const resizeHandle = container.querySelector('.pip-resize-handle');
+
+                    if (header._dragging) {
+                        container.style.left = (e.clientX - header._dragX) + 'px';
+                        container.style.top = (e.clientY - header._dragY) + 'px';
+                        container.style.right = 'auto';
+                        container.style.bottom = 'auto';
+                    }
+                    if (resizeHandle._resizing) {
+                        const MAX_W = Math.min(960, innerWidth - 40);
+                        const MAX_H = Math.min(540, innerHeight - 40);
+                        let newW = Math.max(MIN_W, Math.min(MAX_W, resizeHandle._sw + (e.clientX - resizeHandle._rx)));
+                        let newH = Math.max(MIN_H, Math.min(MAX_H, resizeHandle._sh + (e.clientY - resizeHandle._ry)));
+                        container.style.width = newW + 'px';
+                        container.style.height = newH + 'px';
+                    }
+                });
+            });
+
+            document.addEventListener('mouseup', () => {
+                document.querySelectorAll('.pip-container').forEach(container => {
+                    container.querySelector('.pip-header')._dragging = false;
+                    container.querySelector('.pip-resize-handle')._resizing = false;
+                });
+            });
+        })();
+    </script>
+</body>
+</html>
