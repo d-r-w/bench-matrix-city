@@ -161,6 +161,20 @@
             scene.fog = new THREE.FogExp2(0x000802, 0.004);
         scene.background = new THREE.Color(0x000301);
 
+            // Subtle ambient light so building geometry is visible
+            const ambLight = new THREE.AmbientLight(0x00ff41, 0.08);
+            scene.add(ambLight);
+
+            // Faint directional light from above for building form
+            const dirLight = new THREE.DirectionalLight(0x00aa30, 0.12);
+            dirLight.position.set(0, 80, 0);
+            scene.add(dirLight);
+
+            // Camera-following point light for local building illumination
+            const camLight = new THREE.PointLight(0x00ff41, 0.6, 35);
+            scene.add(camLight);
+            window._camLight = camLight;
+
             camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 400);
 
             renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -232,158 +246,131 @@
 
         const buildingHeights = [];
 
-        function buildCity() {
-            const half = Math.floor(GRID / 2);
+        // ── Helpers for city generation ───────────────────────────────
 
+        function calcBuildingHeight(gx, gz) {
+            const dist = Math.sqrt(gx * gx + gz * gz);
+            let maxH = Math.max(5, 48 - dist * 1.5);
+            maxH += (Math.random() - 0.5) * 12;
+            // Create landmark skyscrapers near center
+            if (dist < 4 && Math.random() > 0.5) maxH = Math.floor(maxH * 1.6);
+            return Math.floor(maxH);
+        }
 
-            const positions = [];
-            const charIndices = [];
-            const brightFlags = [];
+        function isRoadCell(gx, gz) {
+            return gx % 2 === 0 || gz % 2 === 0;
+        }
 
-            for (let gx = -half; gx <= half; gx++) {
-                for (let gz = -half; gz <= half; gz++) {
-                    const dist = Math.sqrt(gx * gx + gz * gz);
+        function fillChance(dist) {
+            return Math.max(0.35, 0.7 - dist * 0.04);
+        }
 
-                    let maxH = Math.max(5, 48 - dist * 1.5);
-                    maxH += (Math.random() - 0.5) * 12;
-                    // Create landmark skyscrapers near center
-                    if (dist < 4 && Math.random() > 0.5) maxH = Math.floor(maxH * 1.6);
-                    maxH = Math.floor(maxH);
+        function charSpacingForDist(dist) {
+            return Math.max(0.3, 0.28 + dist * 0.01);
+        }
 
-                    const bx = gx * CELL;
-                    const bz = gz * CELL;
+        function floorSkipForDist(dist) {
+            return dist < 6 ? 1 : (dist < 10 ? 2 : 3);
+        }
 
-                    buildingHeights.push({ x: bx, z: bz, h: maxH });
+        function glyphBrightness(faceSign, floorH, maxH) {
+            let shadow = 1.0;
+            if (faceSign === -1) shadow *= 0.6;   // back/left faces darker
+            if (floorH < maxH * 0.2) shadow *= 0.7; // lower floors slightly darker
+            return Math.random() > 0.6 ? shadow : shadow * 0.45;
+        }
 
+        function pushGlyph(positions, charIndices, brightFlags, px, py, pz, chIdx, bright) {
+            positions.push(px, py, pz);
+            charIndices.push(chIdx);
+            brightFlags.push(bright);
+        }
 
-                    // Skip grid cells to create streets — denser in center, sparser at edges
-                    const isStreetX = Math.abs(gx) % 3 === 0;
-                    const isStreetZ = Math.abs(gz) % 3 === 0;
-                    if (isStreetX || isStreetZ) {
-                        continue;
-                    }
+        function addWallChars(positions, charIndices, brightFlags, bx, bz, maxH, dist) {
+            const hw = BUILDING_WIDTH / 2;
+            const spacing = charSpacingForDist(dist);
+            const charsOnEdge = Math.floor((hw * 2) / spacing);
+            const floorSkip = floorSkipForDist(dist);
 
-                    // Randomly leave blocks empty for open plazas / parks — more density near center
-                    const fillChance = Math.max(0.35, 0.7 - dist * 0.04);
-                    if (Math.random() > fillChance) {
-                        continue;
-                    }
+            const faceDefs = [
+                { axis: 'x', sign: -1 },
+                { axis: 'x', sign: 1 },
+                { axis: 'z', sign: -1 },
+                { axis: 'z', sign: 1 },
+            ];
 
-                    const hw = BUILDING_WIDTH / 2;
+            for (const face of faceDefs) {
+                for (let i = 0; i < charsOnEdge; i++) {
+                    const pos = (i - charsOnEdge / 2 + 0.5) * spacing;
 
-                    const faceDefs = [
-                        { axis: 'x', sign: -1 },
-                        { axis: 'x', sign: 1 },
-                        { axis: 'z', sign: -1 },
-                        { axis: 'z', sign: 1 },
-                    ];
+                    for (let h = 1; h <= maxH; h += floorSkip) {
+                        if (Math.random() < 0.12) continue; // organic gaps
 
-                    const charSpacing = Math.max(0.3, 0.28 + dist * 0.01);
+                        const ch = randChar();
+                        const charIdx = charToIndex.get(ch);
+                        if (charIdx < 0) continue;
 
-                    for (const face of faceDefs) {
-                        const charsOnEdge = Math.floor((hw * 2) / charSpacing);
+                        const bright = glyphBrightness(face.sign, h, maxH);
 
-                        for (let i = 0; i < charsOnEdge; i++) {
-                            const pos = (i - charsOnEdge / 2 + 0.5) * charSpacing;
-
-                            // Tighter vertical spacing — every row or skip 1 for tall buildings
-                            const floorSkip = dist < 6 ? 1 : (dist < 10 ? 2 : 3);
-                            for (let h = 1; h <= maxH; h += floorSkip) {
-                                // Randomly skip some positions for a more organic look
-                                if (Math.random() < 0.12) continue;
-
-                                const ch = randChar();
-
-                                const charIdx = charToIndex.get(ch);
-                                if (charIdx < 0) continue;
-
-                                // Emulate shadows by darkening glyphs based on face orientation and height
-                                let shadow = 1.0;
-                                if (face.sign === -1) shadow *= 0.6; // Back/left faces darker
-                                if (h < maxH * 0.2) shadow *= 0.7; // Lower floors slightly darker
-                                const bright = Math.random() > 0.6 ? shadow : shadow * 0.45;
-
-                                let px, pz;
-                                if (face.axis === 'x') {
-                                    px = bx + pos;
-                                    pz = bz + face.sign * hw;
-                                } else {
-                                    px = bx + face.sign * hw;
-                                    pz = bz + pos;
-                                }
-
-                                positions.push(px, h * 0.32, pz);
-                                charIndices.push(charIdx);
-                                brightFlags.push(bright);
-                            }
-                        }
-                    }
-
-
-                    const roofY = maxH * 0.32;
-                    const charsOnEdge2 = Math.floor((hw * 2) / charSpacing);
-
-                    for (let i = 0; i < charsOnEdge2; i++) {
-                        const pos = (i - charsOnEdge2 / 2 + 0.5) * charSpacing;
-
-                        for (const sign of [-1, 1]) {
-                            const ch = randChar();
-                            const charIdx = charToIndex.get(ch);
-                            if (charIdx < 0) continue;
-
-                            positions.push(bx + pos, roofY, bz + sign * hw);
-                            charIndices.push(charIdx);
-                            brightFlags.push(1.0);
+                        let px, pz;
+                        if (face.axis === 'x') {
+                            px = bx + pos;
+                            pz = bz + face.sign * hw;
+                        } else {
+                            px = bx + face.sign * hw;
+                            pz = bz + pos;
                         }
 
-                        for (const sign of [-1, 1]) {
-                            const ch = randChar();
-                            const charIdx = charToIndex.get(ch);
-                            if (charIdx < 0) continue;
-
-                            positions.push(bx + sign * hw, roofY, bz + pos);
-                            charIndices.push(charIdx);
-                            brightFlags.push(1.0);
-                        }
+                        pushGlyph(positions, charIndices, brightFlags, px, h * 0.32, pz, charIdx, bright);
                     }
                 }
             }
+        }
 
-            const totalChars = positions.length / 3;
+        function addRoofChars(positions, charIndices, brightFlags, bx, bz, maxH, dist) {
+            const hw = BUILDING_WIDTH / 2;
+            const spacing = charSpacingForDist(dist);
+            const roofY = maxH * 0.32;
+            const charsOnEdge = Math.floor((hw * 2) / spacing);
 
+            for (let i = 0; i < charsOnEdge; i++) {
+                const pos = (i - charsOnEdge / 2 + 0.5) * spacing;
 
+                // Two edges parallel to z-axis (varying x, fixed z at ±hw)
+                for (const sign of [-1, 1]) {
+                    const ch = randChar();
+                    const charIdx = charToIndex.get(ch);
+                    if (charIdx < 0) continue;
+
+                    pushGlyph(positions, charIndices, brightFlags, bx + pos, roofY, bz + sign * hw, charIdx, 1.0);
+                }
+
+                // Two edges parallel to x-axis (fixed x at ±hw, varying z)
+                for (const sign of [-1, 1]) {
+                    const ch = randChar();
+                    const charIdx = charToIndex.get(ch);
+                    if (charIdx < 0) continue;
+
+                    pushGlyph(positions, charIndices, brightFlags, bx + sign * hw, roofY, bz + pos, charIdx, 1.0);
+                }
+            }
+        }
+
+        function computeUVOffsets(charIndices, totalChars) {
             const uvOffsets = new Float32Array(totalChars * 2);
-
             for (let i = 0; i < totalChars; i++) {
                 const charIdx = charIndices[i];
-                const col = charIdx % ATLAS_COLS;
-                const row = Math.floor(charIdx / ATLAS_ROWS);
-
-                uvOffsets[i * 2]       = col / ATLAS_COLS;
-
-                uvOffsets[i * 2 + 1]   = row / ATLAS_ROWS;
+                uvOffsets[i * 2]     = (charIdx % ATLAS_COLS) / ATLAS_COLS;
+                uvOffsets[i * 2 + 1] = Math.floor(charIdx / ATLAS_ROWS) / ATLAS_ROWS;
             }
+            return uvOffsets;
+        }
 
-
-            const geo = new THREE.PlaneGeometry(1, 1);
-
-
-            const instancePositions = new Float32Array(totalChars * 3);
-            const instanceScales = new Float32Array(totalChars * 2);
-
-            for (let i = 0; i < totalChars; i++) {
-                instancePositions[i * 3]     = positions[i * 3];
-                instancePositions[i * 3 + 1] = positions[i * 3 + 1];
-                instancePositions[i * 3 + 2] = positions[i * 3 + 2];
-                instanceScales[i * 2]   = 0.45;
-                instanceScales[i * 2 + 1] = 0.38;
-            }
-
-
-            const mat = new THREE.ShaderMaterial({
+        function createMatrixShaderMaterial() {
+            return new THREE.ShaderMaterial({
                 uniforms: {
                     uAtlas: { value: atlasTex },
-                    uTime: { value: 0 }
+                    uTime:  { value: 0 }
                 },
                 vertexShader: `
                     attribute vec3 instancePosition;
@@ -397,15 +384,14 @@
                     varying float vAlpha;
 
                     void main() {
-
                         vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
-                        vec3 up   = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+                        vec3 up    = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
 
+                        vec3 worldPos = instancePosition
+                            + (position.x * instanceScale.x) * right
+                            + (position.y * instanceScale.y) * up;
 
-                        vec3 worldPos = instancePosition + (position.x * instanceScale.x) * right + (position.y * instanceScale.y) * up;
-
-
-                        vUv = uv * vec2(1.0/${ATLAS_COLS}.0, 1.0/${ATLAS_ROWS}.0) + instanceUVOffset;
+                        vUv     = uv * vec2(1.0/${ATLAS_COLS}.0, 1.0/${ATLAS_ROWS}.0) + instanceUVOffset;
                         vBright = instanceBright;
                         vAlpha  = instanceAlpha;
 
@@ -423,11 +409,9 @@
                         vec4 texel = texture(uAtlas, vUv);
 
                         float charAlpha = max(texel.r, max(texel.g, texel.b));
-                        // Dynamic scanline & flicker effect
                         float scanline = 0.85 + 0.15 * sin(vUv.y * 150.0 + uTime * 5.0);
-                        float flicker = 0.92 + 0.08 * sin(uTime * 3.0 + vUv.x * 50.0);
+                        float flicker  = 0.92 + 0.08 * sin(uTime * 3.0 + vUv.x * 50.0);
 
-                        // Use the atlas texture's own green colors, modulated by brightness
                         vec3 col = texel.rgb * vBright;
 
                         float finalAlpha = charAlpha * vBright * vAlpha * scanline * flicker;
@@ -439,115 +423,649 @@
                 transparent: true,
                 depthWrite: false,
             });
+        }
 
-            const instancedMesh = new THREE.InstancedMesh(geo, mat, totalChars);
-            instancedMesh.frustumCulled = false;
+        function buildInstancedMesh(positions, charIndices, brightFlags) {
+            const totalChars = positions.length / 3;
 
+            // Pack position & scale arrays for instanced attributes
+            const instancePositions = new Float32Array(totalChars * 3);
+            const instanceScales    = new Float32Array(totalChars * 2);
+            for (let i = 0; i < totalChars; i++) {
+                instancePositions[i * 3]     = positions[i * 3];
+                instancePositions[i * 3 + 1] = positions[i * 3 + 1];
+                instancePositions[i * 3 + 2] = positions[i * 3 + 2];
+                instanceScales[i * 2]        = 0.45;
+                instanceScales[i * 2 + 1]    = 0.38;
+            }
 
-            const posAttr = new THREE.InstancedBufferAttribute(instancePositions, 3);
-            instancedMesh.geometry.setAttribute('instancePosition', posAttr);
+            const uvOffsets = computeUVOffsets(charIndices, totalChars);
 
-            const scaleAttr = new THREE.InstancedBufferAttribute(instanceScales, 2);
-            instancedMesh.geometry.setAttribute('instanceScale', scaleAttr);
+            const geo = new THREE.PlaneGeometry(1, 1);
+            const mat = createMatrixShaderMaterial();
 
+            const mesh = new THREE.InstancedMesh(geo, mat, totalChars);
+            mesh.frustumCulled = false;
 
-            const uvOffsetAttr = new THREE.InstancedBufferAttribute(uvOffsets, 2);
-            instancedMesh.geometry.setAttribute('instanceUVOffset', uvOffsetAttr);
-
-
-            const brightAttr = new THREE.InstancedBufferAttribute(new Float32Array(brightFlags), 1);
-            instancedMesh.geometry.setAttribute('instanceBright', brightAttr);
-
+            // Attach custom instanced attributes
+            mesh.geometry.setAttribute('instancePosition',
+                new THREE.InstancedBufferAttribute(instancePositions, 3));
+            mesh.geometry.setAttribute('instanceScale',
+                new THREE.InstancedBufferAttribute(instanceScales, 2));
+            mesh.geometry.setAttribute('instanceUVOffset',
+                new THREE.InstancedBufferAttribute(uvOffsets, 2));
+            mesh.geometry.setAttribute('instanceBright',
+                new THREE.InstancedBufferAttribute(new Float32Array(brightFlags), 1));
 
             const alphas = new Float32Array(totalChars).fill(1.0);
-            const alphaAttr = new THREE.InstancedBufferAttribute(alphas, 1);
-            instancedMesh.geometry.setAttribute('instanceAlpha', alphaAttr);
+            mesh.geometry.setAttribute('instanceAlpha',
+                new THREE.InstancedBufferAttribute(alphas, 1));
 
-
-            instancedMesh.userData.positions = instancePositions;
-            instancedMesh.userData.scales = instanceScales;
-            instancedMesh.userData.alphas = alphas;
-
-
+            // Identity matrices for all instances (position is in custom attribute)
             const dummy = new THREE.Object3D();
             for (let i = 0; i < totalChars; i++) {
                 dummy.position.set(0, 0, 0);
                 dummy.scale.set(1, 1, 1);
                 dummy.updateMatrix();
-                instancedMesh.setMatrixAt(i, dummy.matrix);
+                mesh.setMatrixAt(i, dummy.matrix);
             }
 
+            mesh.instanceMatrix.needsUpdate = true;
 
-            const charIndexArray = new Uint16Array(charIndices);
-
-            instancedMesh.instanceMatrix.needsUpdate = true;
-            scene.add(instancedMesh);
-
-
-            window._matrixInstancedMesh = instancedMesh;
-
-            // Flying vehicles (light trails)
-            const vehicleCount = 20;
-            for (let i = 0; i < vehicleCount; i++) {
-                const r = Math.random();
-                let vColor;
-                if (r > 0.7) vColor = 0x44ffdd;
-                else if (r > 0.5) vColor = 0xffaa33;
-                else vColor = 0x55ff77;
-                const vMat = new THREE.MeshBasicMaterial({
-                    color: vColor,
-                    transparent: true,
-                    opacity: 0.6,
-                });
-                const vGeo = new THREE.SphereGeometry(0.12, 4, 3);
-                const vehicle = new THREE.Mesh(vGeo, vMat);
-
-                // Pick a random avenue to fly along
-                const axis = Math.random() > 0.5 ? 'x' : 'z';
-                const aveIdx = Math.floor((Math.random() * 2 - 1) * (GRID / 3));
-                const avePos = aveIdx * 3 * CELL;
-
-                vehicle.position.set(
-                    axis === 'x' ? (Math.random() - 0.5) * GRID * CELL : avePos,
-                    8 + Math.random() * 30,
-                    axis === 'z' ? (Math.random() - 0.5) * GRID * CELL : avePos
-                );
-
-                vehicle.userData.flyAxis = axis;
-                vehicle.userData.flySpeed = 3 + Math.random() * 5;
-                vehicle.userData.flyDir = Math.random() > 0.5 ? 1 : -1;
-                vehicle.userData.flyY = vehicle.position.y;
-
-                // Trail behind the vehicle (opposite to direction of travel)
-                const dir = -vehicle.userData.flyDir;
-                const trailGeo = new THREE.BufferGeometry().setFromPoints([
-                    new THREE.Vector3(0, 0, 0),
-                    new THREE.Vector3(axis === 'x' ? dir * 2 : 0, 0, axis === 'z' ? dir * 2 : 0),
-                ]);
-                const trailMat = new THREE.LineBasicMaterial({
-                    color: vColor,
-                    transparent: true,
-                    opacity: 0.2,
-                });
-                const trail = new THREE.Line(trailGeo, trailMat);
-                vehicle.add(trail);
-
-                scene.add(vehicle);
-            }
-            window._vehicles = scene.children.filter(c => c.userData.flyAxis !== undefined);
-
-
-            const refreshRates = new Float32Array(totalChars).map(() => 0.8 + Math.random() * 2.5);
-            instancedMesh.userData = {
+            // Runtime animation data (overwrites any prior userData)
+            mesh.userData = {
                 uvOffsets,
                 scales: instanceScales,
                 alphas,
-                charIndices: charIndexArray,
-                refreshRates,
+                charIndices: new Uint16Array(charIndices),
+                refreshRates: new Float32Array(totalChars).map(() => 0.8 + Math.random() * 2.5),
                 nextRefresh: new Float32Array(totalChars).fill(0),
                 lastRefreshTime: new Float32Array(totalChars).fill(0),
                 decayRates: new Float32Array(totalChars).map(() => 1.5 + Math.random() * 3.0),
             };
+
+            return mesh;
+        }
+
+        function createVehicle() {
+            const r = Math.random();
+            const vColor = r > 0.7 ? 0x44ffdd : (r > 0.5 ? 0xffaa33 : 0x55ff77);
+
+            const vMat = new THREE.MeshBasicMaterial({
+                color: vColor, transparent: true, opacity: 0.6,
+            });
+            const vGeo = new THREE.SphereGeometry(0.12, 4, 3);
+            const vehicle = new THREE.Mesh(vGeo, vMat);
+
+            // Pick a random avenue to fly along
+            const axis = Math.random() > 0.5 ? 'x' : 'z';
+            const roadIdx = Math.floor((Math.random() * 2 - 1) * (GRID / 2));
+            const roadPos = roadIdx * 2 * CELL;
+
+            vehicle.position.set(
+                axis === 'x' ? (Math.random() - 0.5) * GRID * CELL : roadPos,
+                8 + Math.random() * 30,
+                axis === 'z' ? (Math.random() - 0.5) * GRID * CELL : roadPos
+            );
+
+            vehicle.userData.flyAxis = axis;
+            vehicle.userData.flySpeed = 3 + Math.random() * 5;
+            vehicle.userData.flyDir   = Math.random() > 0.5 ? 1 : -1;
+            vehicle.userData.flyY     = vehicle.position.y;
+
+            // Trail behind the vehicle (opposite to direction of travel)
+            const dir = -vehicle.userData.flyDir;
+            const trailGeo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(axis === 'x' ? dir * 2 : 0, 0, axis === 'z' ? dir * 2 : 0),
+            ]);
+            const trailMat = new THREE.LineBasicMaterial({
+                color: vColor, transparent: true, opacity: 0.2,
+            });
+            vehicle.add(new THREE.Line(trailGeo, trailMat));
+
+            return vehicle;
+        }
+
+        // ── Main city builder ─────────────────────────────────────────
+
+        // ── Geometry merging helper (avoids extra import) ───────────
+
+        function mergeBufferGeometries(meshes) {
+            const positions = [];
+            const normals = [];
+            const uvs = [];
+            const indices = [];
+            let indexOffset = 0;
+
+            function processMesh(geo, px, py, pz) {
+                geo.translate(px, py, pz);
+
+                const posAttr = geo.getAttribute('position');
+                const normAttr = geo.getAttribute('normal');
+                const uvAttr = geo.getAttribute('uv');
+
+                for (let i = 0; i < posAttr.count; i++) {
+                    positions.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+                    if (normAttr) normals.push(normAttr.getX(i), normAttr.getY(i), normAttr.getZ(i));
+                    if (uvAttr) uvs.push(uvAttr.getX(i), uvAttr.getY(i));
+                }
+
+                if (geo.index) {
+                    for (let i = 0; i < geo.index.count; i++) {
+                        indices.push(geo.index.array[i] + indexOffset);
+                    }
+                } else {
+                    for (let i = 0; i < posAttr.count; i++) {
+                        indices.push(i + indexOffset);
+                    }
+                }
+
+                indexOffset += posAttr.count;
+            }
+
+            for (const obj of meshes) {
+                if (obj.isGroup) {
+                    // Group: process each child with parent offset
+                    for (const child of obj.children) {
+                        const geo = child.geometry.clone();
+                        processMesh(geo,
+                            obj.position.x + child.position.x,
+                            obj.position.y + child.position.y,
+                            obj.position.z + child.position.z
+                        );
+                    }
+                } else {
+                    // Plain mesh
+                    const geo = obj.geometry.clone();
+                    processMesh(geo, obj.position.x, obj.position.y, obj.position.z);
+                }
+            }
+
+            const merged = new THREE.BufferGeometry();
+            merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            if (normals.length) merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            if (uvs.length) merged.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+            merged.setIndex(indices);
+
+            return merged;
+        }
+
+        // ── Building geometry detail helpers ────────────────────────
+
+        function createBuildingBox(bx, bz, maxH) {
+            const hw = BUILDING_WIDTH / 2;
+            const h = maxH * 0.32;
+
+            // Main box + horizontal ledges at intervals for architectural detail
+            const group = new THREE.Group();
+
+            // Main building body (slightly inset from full width to leave room for ledges)
+            const bodyW = BUILDING_WIDTH - 0.1;
+            const bodyGeo = new THREE.BoxGeometry(bodyW, h, bodyW);
+            group.add(new THREE.Mesh(bodyGeo));
+
+            // Horizontal ledges every few floors
+            const ledgeCount = Math.max(1, Math.floor(maxH / 6));
+            for (let l = 0; l < ledgeCount; l++) {
+                const ledgeY = (l + 1) / (ledgeCount + 1) * h;
+                const ledgeW = BUILDING_WIDTH + 0.2;
+                const ledgeGeo = new THREE.BoxGeometry(ledgeW, 0.08, ledgeW);
+                const ledge = new THREE.Mesh(ledgeGeo);
+                ledge.position.y = ledgeY;
+                group.add(ledge);
+            }
+
+            // Top cornice (wider ledge at roof)
+            const corniceW = BUILDING_WIDTH + 0.3;
+            const corniceGeo = new THREE.BoxGeometry(corniceW, 0.12, corniceW);
+            const cornice = new THREE.Mesh(corniceGeo);
+            cornice.position.y = h / 2 + 0.06;
+            group.add(cornice);
+
+            // Vertical pipes/conduits on random edges
+            const pipeCount = Math.floor(Math.random() * 3);
+            for (let p = 0; p < pipeCount; p++) {
+                const faceIdx = Math.floor(Math.random() * 4);
+                const pipeGeo = new THREE.CylinderGeometry(0.04, 0.05, h * (0.6 + Math.random() * 0.4), 6);
+                const pipe = new THREE.Mesh(pipeGeo);
+
+                // Position along building edge
+                const edgePos = (Math.random() - 0.5) * BUILDING_WIDTH * 0.7;
+                const offset = hw + 0.06;
+
+                if (faceIdx === 0) {
+                    pipe.position.set(edgePos, h * 0.1, offset);
+                } else if (faceIdx === 1) {
+                    pipe.position.set(edgePos, h * 0.1, -offset);
+                } else if (faceIdx === 2) {
+                    pipe.position.set(offset, h * 0.1, edgePos);
+                } else {
+                    pipe.position.set(-offset, h * 0.1, edgePos);
+                }
+
+                group.add(pipe);
+            }
+
+            group.position.set(bx, h / 2, bz);
+            return group;
+        }
+
+        function addWindowGrid(bx, bz, maxH) {
+            const hw = BUILDING_WIDTH / 2;
+            const buildingH = maxH * 0.32;
+            const winW = 0.45, winH = 0.35;
+            const gapX = 1.0, gapY = 0.95;
+
+            // Collect window positions per face for instancing
+            const winPositions = [];
+            const winBrights = [];
+
+            const faceDefs = [
+                { axis: 'x', sign: 1, rotY: 0 },
+                { axis: 'x', sign: -1, rotY: Math.PI },
+                { axis: 'z', sign: 1, rotY: Math.PI / 2 },
+                { axis: 'z', sign: -1, rotY: -Math.PI / 2 },
+            ];
+
+            for (const face of faceDefs) {
+                const cols = Math.floor((BUILDING_WIDTH * 2 - 0.6) / gapX);
+                const rows = Math.floor((buildingH - 1.0) / gapY);
+
+                for (let c = 0; c < cols; c++) {
+                    const localX = (c - cols / 2 + 0.5) * gapX;
+                    for (let r = 0; r < rows; r++) {
+                        const localY = 0.6 + r * gapY;
+
+                        // Randomly skip windows for organic look — ~70% dark
+                        if (Math.random() > 0.3) continue;
+
+                        let px, pz;
+                        if (face.axis === 'x') {
+                            px = bx + localX;
+                            pz = bz + face.sign * (hw + 0.01);
+                        } else {
+                            px = bx + face.sign * (hw + 0.01);
+                            pz = bz + localX;
+                        }
+
+                        winPositions.push(px, localY, pz);
+                        // Brightness: some windows are warm amber, most green
+                        const isWarm = Math.random() > 0.85;
+                        winBrights.push(isWarm ? 2.0 : 1.0);
+                    }
+                }
+            }
+
+            if (winPositions.length === 0) return null;
+
+            const count = winPositions.length / 3;
+            const geo = new THREE.PlaneGeometry(winW, winH);
+            const mat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                },
+                vertexShader: `
+                    attribute float instanceBright;
+                    varying float vBright;
+                    void main() {
+                        vBright = instanceBright;
+                        vec4 worldPos = instanceMatrix * vec4(position, 1.0);
+                        gl_Position = projectionMatrix * viewMatrix * worldPos;
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    varying float vBright;
+                    void main() {
+                        vec3 green = vec3(0.0, 0.9, 0.25);
+                        vec3 amber = vec3(1.0, 0.6, 0.1);
+                        vec3 col = vBright > 1.5 ? amber : green;
+
+                        float flicker = 0.85 + 0.15 * sin(uTime * (2.0 + vBright));
+                        float alpha = 0.55 * flicker;
+
+                        gl_FragColor = vec4(col, alpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+
+            const mesh = new THREE.InstancedMesh(geo, mat, count);
+            const dummy = new THREE.Object3D();
+            for (let i = 0; i < count; i++) {
+                dummy.position.set(
+                    winPositions[i * 3],
+                    winPositions[i * 3 + 1],
+                    winPositions[i * 3 + 2]
+                );
+                dummy.scale.set(1, 1, 1);
+                dummy.updateMatrix();
+                mesh.setMatrixAt(i, dummy.matrix);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+            mesh.geometry.setAttribute('instanceBright',
+                new THREE.InstancedBufferAttribute(new Float32Array(winBrights), 1));
+
+            return mesh;
+        }
+
+        function addDoors(bx, bz) {
+            const hw = BUILDING_WIDTH / 2;
+            const doorW = 0.8, doorH = 1.4;
+
+            // Pick one or two random faces for doors
+            const faceCount = Math.random() > 0.5 ? 1 : 2;
+            const faces = [
+                { axis: 'x', sign: 1, rotY: 0 },
+                { axis: 'z', sign: 1, rotY: Math.PI / 2 },
+            ];
+
+            const group = new THREE.Group();
+
+            for (let f = 0; f < faceCount; f++) {
+                const face = faces[f % faces.length];
+                let px, pz;
+                if (face.axis === 'x') {
+                    px = bx + (Math.random() - 0.5) * BUILDING_WIDTH * 0.6;
+                    pz = bz + face.sign * (hw + 0.02);
+                } else {
+                    px = bx + face.sign * (hw + 0.02);
+                    pz = bz + (Math.random() - 0.5) * BUILDING_WIDTH * 0.6;
+                }
+
+                // Door frame (emissive border)
+                const frameGeo = new THREE.PlaneGeometry(doorW + 0.15, doorH + 0.1);
+                const frameMat = new THREE.MeshBasicMaterial({
+                    color: 0x00ff41,
+                    transparent: true,
+                    opacity: 0.35,
+                    blending: THREE.AdditiveBlending,
+                });
+                const frame = new THREE.Mesh(frameGeo, frameMat);
+                frame.position.set(px, doorH / 2, pz);
+
+                // Inner dark panel
+                const innerGeo = new THREE.PlaneGeometry(doorW - 0.1, doorH - 0.1);
+                const innerMat = new THREE.MeshBasicMaterial({
+                    color: 0x001a05,
+                });
+                const inner = new THREE.Mesh(innerGeo, innerMat);
+                inner.position.set(px, doorH / 2, pz + (face.sign * -0.005));
+
+                group.add(frame);
+                group.add(inner);
+            }
+
+            return group;
+        }
+
+        function addAntenna(bx, bz, maxH) {
+            const hw = BUILDING_WIDTH / 2;
+            const roofY = maxH * 0.32;
+
+            // Random position on roof
+            const ax = bx + (Math.random() - 0.5) * BUILDING_WIDTH * 0.6;
+            const az = bz + (Math.random() - 0.5) * BUILDING_WIDTH * 0.6;
+
+            const group = new THREE.Group();
+
+            // Pole
+            const poleH = 2 + Math.random() * 4;
+            const poleGeo = new THREE.CylinderGeometry(0.03, 0.04, poleH, 6);
+            const poleMat = new THREE.MeshStandardMaterial({
+                color: 0x1a2a1a,
+                roughness: 0.6,
+                metalness: 0.7,
+            });
+            const pole = new THREE.Mesh(poleGeo, poleMat);
+            pole.position.set(ax, roofY + poleH / 2, az);
+            group.add(pole);
+
+            // Blinking light at top
+            const lightGeo = new THREE.SphereGeometry(0.08, 6, 4);
+            const lightMat = new THREE.MeshBasicMaterial({
+                color: Math.random() > 0.5 ? 0xff2200 : 0x00ff41,
+                transparent: true,
+                opacity: 0.9,
+            });
+            const light = new THREE.Mesh(lightGeo, lightMat);
+            light.position.set(ax, roofY + poleH + 0.08, az);
+            light.userData.blinkSpeed = 1 + Math.random() * 3;
+            light.userData.blinkPhase = Math.random() * Math.PI * 2;
+            group.add(light);
+
+            // Sometimes add a second shorter antenna nearby
+            if (Math.random() > 0.5) {
+                const ax2 = ax + (Math.random() - 0.5) * 1.5;
+                const az2 = az + (Math.random() - 0.5) * 1.5;
+                const poleH2 = 1 + Math.random() * 2;
+                const pole2Geo = new THREE.CylinderGeometry(0.02, 0.03, poleH2, 6);
+                const pole2 = new THREE.Mesh(pole2Geo, poleMat.clone());
+                pole2.position.set(ax2, roofY + poleH2 / 2, az2);
+                group.add(pole2);
+
+                const light2 = new THREE.Mesh(lightGeo.clone(), lightMat.clone());
+                light2.position.set(ax2, roofY + poleH2 + 0.06, az2);
+                light2.userData.blinkSpeed = 1 + Math.random() * 3;
+                light2.userData.blinkPhase = Math.random() * Math.PI * 2;
+                group.add(light2);
+            }
+
+            return group;
+        }
+
+        function addSatelliteDish(bx, bz, maxH) {
+            const hw = BUILDING_WIDTH / 2;
+            const roofY = maxH * 0.32;
+
+            const dx = bx + (Math.random() - 0.5) * BUILDING_WIDTH * 0.5;
+            const dz = bz + (Math.random() - 0.5) * BUILDING_WIDTH * 0.5;
+
+            const group = new THREE.Group();
+
+            // Dish base (cone shape)
+            const dishR = 0.3 + Math.random() * 0.25;
+            const dishH = dishR * 0.6;
+            const dishGeo = new THREE.ConeGeometry(dishR, dishH, 12, 1, true);
+            const dishMat = new THREE.MeshStandardMaterial({
+                color: 0x1a2a1a,
+                roughness: 0.5,
+                metalness: 0.8,
+                side: THREE.DoubleSide,
+            });
+            const dish = new THREE.Mesh(dishGeo, dishMat);
+
+            // Tilt the dish upward at a random angle
+            const tiltX = (Math.random() - 0.5) * 0.8;
+            const tiltZ = (Math.random() - 0.5) * 0.8;
+            dish.rotation.set(tiltX, Math.random() * Math.PI * 2, tiltZ);
+            dish.position.set(dx, roofY + dishH / 2 - 0.1, dz);
+            group.add(dish);
+
+            // Feed horn (small sphere at dish focus)
+            const feedGeo = new THREE.SphereGeometry(0.05, 6, 4);
+            const feedMat = new THREE.MeshBasicMaterial({
+                color: 0x00ff41,
+                transparent: true,
+                opacity: 0.5,
+            });
+            const feed = new THREE.Mesh(feedGeo, feedMat);
+            // Position at approximate focal point
+            const offset = dishR * 0.3;
+            feed.position.set(
+                dx + Math.sin(tiltX) * offset,
+                roofY + dishH - 0.15 + Math.cos(tiltX) * offset * 0.3,
+                dz + Math.sin(tiltZ) * offset
+            );
+            group.add(feed);
+
+            // Support pole
+            const poleGeo = new THREE.CylinderGeometry(0.025, 0.03, dishH * 1.2, 6);
+            const poleMat = new THREE.MeshStandardMaterial({
+                color: 0x1a2a1a,
+                roughness: 0.6,
+                metalness: 0.7,
+            });
+            const pole = new THREE.Mesh(poleGeo, poleMat);
+            pole.position.set(dx, roofY + dishH * 0.5 - 0.1, dz);
+            group.add(pole);
+
+            return group;
+        }
+
+        function addRoofDetails(bx, bz, maxH) {
+            const group = new THREE.Group();
+
+            // AC unit / box on roof
+            if (Math.random() > 0.4) {
+                const acW = 0.6 + Math.random() * 0.5;
+                const acD = 0.4 + Math.random() * 0.3;
+                const acH = 0.5 + Math.random() * 0.4;
+                const roofY = maxH * 0.32;
+                const acGeo = new THREE.BoxGeometry(acW, acH, acD);
+                const acMat = new THREE.MeshStandardMaterial({
+                    color: 0x0a150a,
+                    roughness: 0.7,
+                    metalness: 0.5,
+                });
+                const ac = new THREE.Mesh(acGeo, acMat);
+                ac.position.set(
+                    bx + (Math.random() - 0.5) * BUILDING_WIDTH * 0.4,
+                    roofY + acH / 2,
+                    bz + (Math.random() - 0.5) * BUILDING_WIDTH * 0.4
+                );
+                group.add(ac);
+            }
+
+            // Water tower on some taller buildings
+            if (maxH > 20 && Math.random() > 0.7) {
+                const roofY = maxH * 0.32;
+                const towerX = bx + (Math.random() - 0.5) * BUILDING_WIDTH * 0.3;
+                const towerZ = bz + (Math.random() - 0.5) * BUILDING_WIDTH * 0.3;
+
+                // Legs
+                const legH = 2 + Math.random();
+                for (const [lx, lz] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) {
+                    const legGeo = new THREE.CylinderGeometry(0.02, 0.03, legH, 4);
+                    const legMat = new THREE.MeshStandardMaterial({ color: 0x1a2a1a, metalness: 0.7 });
+                    const leg = new THREE.Mesh(legGeo, legMat);
+                    leg.position.set(towerX + lx, roofY + legH / 2, towerZ + lz);
+                    group.add(leg);
+                }
+
+                // Tank
+                const tankGeo = new THREE.CylinderGeometry(0.5, 0.6, 1.2, 8);
+                const tankMat = new THREE.MeshStandardMaterial({
+                    color: 0x0a150a,
+                    roughness: 0.6,
+                    metalness: 0.5,
+                });
+                const tank = new THREE.Mesh(tankGeo, tankMat);
+                tank.position.set(towerX, roofY + legH + 0.6, towerZ);
+                group.add(tank);
+            }
+
+            return group;
+        }
+
+        // ── Main city builder ─────────────────────────────────────────
+
+        function buildCity() {
+            const half = Math.floor(GRID / 2);
+
+            const positions   = [];
+            const charIndices = [];
+            const brightFlags = [];
+
+            // Collect detail groups for merging
+            const buildingMeshes = [];
+            const windowMeshes = [];
+            const antennaGroups = [];
+
+            // ── Place buildings on the grid ───────────────────────────
+            for (let gx = -half; gx <= half; gx++) {
+                for (let gz = -half; gz <= half; gz++) {
+                    // Skip road cells — buildings only on odd grid positions
+                    if (isRoadCell(gx, gz)) continue;
+
+                    const dist = Math.sqrt(gx * gx + gz * gz);
+                    const maxH = calcBuildingHeight(gx, gz);
+
+                    const bx = gx * CELL;
+                    const bz = gz * CELL;
+                    buildingHeights.push({ x: bx, z: bz, h: maxH });
+
+                    // Randomly leave blocks empty for plazas — denser near center
+                    if (Math.random() > fillChance(dist)) continue;
+
+                    // ── Building geometry details ─────────────────────
+                    buildingMeshes.push(createBuildingBox(bx, bz, maxH));
+
+                    const windows = addWindowGrid(bx, bz, maxH);
+                    if (windows) windowMeshes.push(windows);
+
+                    // Doors on ~40% of buildings
+                    if (Math.random() > 0.6) {
+                        scene.add(addDoors(bx, bz));
+                    }
+
+                    // Antennas on ~35% of buildings, more likely on taller ones
+                    if (Math.random() > (0.5 - maxH * 0.01)) {
+                        antennaGroups.push(addAntenna(bx, bz, maxH));
+                    }
+
+                    // Satellite dishes on ~15% of buildings, more likely near center
+                    if (Math.random() > (0.7 + dist * 0.02)) {
+                        scene.add(addSatelliteDish(bx, bz, maxH));
+                    }
+
+                    // Roof details (AC units, water towers)
+                    scene.add(addRoofDetails(bx, bz, maxH));
+
+                    addWallChars(positions, charIndices, brightFlags, bx, bz, maxH, dist);
+                    addRoofChars(positions, charIndices, brightFlags, bx, bz, maxH, dist);
+                }
+            }
+
+            // ── Merge building boxes into single mesh for performance ─
+            if (buildingMeshes.length > 0) {
+                const mergedGeo = mergeBufferGeometries(buildingMeshes);
+                const buildingMat = new THREE.MeshStandardMaterial({
+                    color: 0x050a06,
+                    roughness: 0.85,
+                    metalness: 0.3,
+                });
+                const buildingGroup = new THREE.Mesh(mergedGeo, buildingMat);
+                scene.add(buildingGroup);
+            }
+
+            // ── Build the instanced character mesh ────────────────────
+            const mesh = buildInstancedMesh(positions, charIndices, brightFlags);
+            scene.add(mesh);
+            window._matrixInstancedMesh = mesh;
+
+            // ── Add window meshes to scene ────────────────────────────
+            for (const wm of windowMeshes) {
+                scene.add(wm);
+            }
+
+            // ── Add antenna groups to scene ───────────────────────────
+            for (const ag of antennaGroups) {
+                scene.add(ag);
+            }
+
+            // ── Store references for animation ────────────────────────
+            window._windowMeshes = windowMeshes;
+            window._antennaGroups = antennaGroups;
+
+            // ── Add flying vehicles with light trails ─────────────────
+            for (let i = 0; i < 20; i++) {
+                scene.add(createVehicle());
+            }
+            window._vehicles = scene.children.filter(c => c.userData.flyAxis !== undefined);
         }
 
 
@@ -604,12 +1122,12 @@
             window._groundPlane = groundPlane;
 
 
-            // Only draw avenue edges (every 3rd cell) — no street-level lines, no center dashes
-            const isAvenue = (i) => Math.abs(i) % 3 === 0;
+            // Draw road edges at every even grid line (roads on the grid lines)
+            const isRoad = (i) => i % 2 === 0;
             const avenueEdgeMat = new THREE.LineBasicMaterial({ color: 0x22ff66, transparent: true, opacity: 0.3 });
 
             for (let i = -GRID; i <= GRID; i++) {
-                if (!isAvenue(i)) continue;
+                if (!isRoad(i)) continue;
                 const pos = i * CELL;
 
                 for (const sign of [-1, 1]) {
@@ -646,13 +1164,13 @@
                 const sprite = new THREE.Sprite(mat);
                 sprite.scale.set(0.5, 0.6, 1);
 
-                const aveIndex = Math.floor((Math.random() * 2 - 1) * ((GRID / 3) | 0));
-                const avePos = aveIndex * 3 * CELL;
+                const roadIdx = Math.floor((Math.random() * 2 - 1) * ((GRID / 2) | 0));
+                const roadPos = roadIdx * 2 * CELL;
 
                 if (Math.random() > 0.5) {
-                    sprite.position.set((Math.random() - 0.5) * size * 2, 0.1, avePos);
+                    sprite.position.set((Math.random() - 0.5) * size * 2, 0.1, roadPos);
                 } else {
-                    sprite.position.set(avePos, 0.1, (Math.random() - 0.5) * size * 2);
+                    sprite.position.set(roadPos, 0.1, (Math.random() - 0.5) * size * 2);
                 }
 
                 sprite.userData.streamSpeed = 0.5 + Math.random() * 1.5;
@@ -1076,6 +1594,32 @@
                         s.material.map = getCharTex(ch, { bright: Math.random() > 0.6, size: 50 });
                     }
                 }
+            }
+
+            // Animate window grid time uniforms
+            if (window._windowMeshes) {
+                for (const wm of window._windowMeshes) {
+                    if (wm.material && wm.material.uniforms && wm.material.uniforms.uTime) {
+                        wm.material.uniforms.uTime.value = t;
+                    }
+                }
+            }
+
+            // Animate antenna blink lights
+            if (window._antennaGroups) {
+                for (const group of window._antennaGroups) {
+                    for (const child of group.children) {
+                        if (child.userData.blinkSpeed !== undefined) {
+                            const blink = Math.sin(t * child.userData.blinkSpeed + child.userData.blinkPhase);
+                            child.material.opacity = blink > 0 ? 0.9 : 0.1;
+                        }
+                    }
+                }
+            }
+
+            // Update camera-following light position
+            if (window._camLight) {
+                window._camLight.position.copy(camera.position);
             }
 
             composer.render();
