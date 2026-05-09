@@ -518,10 +518,11 @@
                 vehicle.userData.flyDir = Math.random() > 0.5 ? 1 : -1;
                 vehicle.userData.flyY = vehicle.position.y;
 
-                // Trail behind the vehicle
+                // Trail behind the vehicle (opposite to direction of travel)
+                const dir = -vehicle.userData.flyDir;
                 const trailGeo = new THREE.BufferGeometry().setFromPoints([
                     new THREE.Vector3(0, 0, 0),
-                    new THREE.Vector3(axis === 'x' ? -2 : 0, 0, axis === 'z' ? -2 : 0),
+                    new THREE.Vector3(axis === 'x' ? dir * 2 : 0, 0, axis === 'z' ? dir * 2 : 0),
                 ]);
                 const trailMat = new THREE.LineBasicMaterial({
                     color: vColor,
