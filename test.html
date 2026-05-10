@@ -598,17 +598,18 @@
             const h = maxH * 0.32;
 
             // Main box + horizontal ledges at intervals for architectural detail
-            const group = new THREE.Group(); // TODO: These sometimes improperly exceed building height - fix
+            const group = new THREE.Group();
 
             // Main building body (slightly inset from full width to leave room for ledges)
             const bodyW = BUILDING_WIDTH - 0.1;
             const bodyGeo = new THREE.BoxGeometry(bodyW, h, bodyW);
             group.add(new THREE.Mesh(bodyGeo));
 
-            // Horizontal ledges every few floors
+            // Horizontal ledges every few floors — positioned in local coords (-h/2 to +h/2)
             const ledgeCount = Math.max(1, Math.floor(maxH / 6));
             for (let l = 0; l < ledgeCount; l++) {
-                const ledgeY = (l + 1) / (ledgeCount + 1) * h;
+                // Distribute evenly within building bounds, inset from top/bottom edges
+                const ledgeY = ((l + 1) / (ledgeCount + 1)) * h - h / 2;
                 const ledgeW = BUILDING_WIDTH + 0.2;
                 const ledgeGeo = new THREE.BoxGeometry(ledgeW, 0.08, ledgeW);
                 const ledge = new THREE.Mesh(ledgeGeo);
@@ -616,11 +617,11 @@
                 group.add(ledge);
             }
 
-            // Top cornice (wider ledge at roof)
+            // Top cornice (wider ledge at roof) — top edge flush with building top
             const corniceW = BUILDING_WIDTH + 0.3;
             const corniceGeo = new THREE.BoxGeometry(corniceW, 0.12, corniceW);
             const cornice = new THREE.Mesh(corniceGeo);
-            cornice.position.y = h / 2 + 0.06;
+            cornice.position.y = h / 2 - 0.06; // center so top edge sits at +h/2
             group.add(cornice);
 
             // Vertical pipes/conduits on random edges
