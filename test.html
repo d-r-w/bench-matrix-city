@@ -1770,6 +1770,19 @@
             border-color: #f448;
             color: #f44;
         }
+        @keyframes crtFlicker {
+            0%, 100% { opacity: 1; filter: blur(0px); }
+            2%        { opacity: 0.7; filter: blur(0.6px); }
+            4%        { opacity: 1; filter: blur(0px); }
+            6%        { opacity: 0.84; filter: blur(0.3px); }
+            8%        { opacity: 1; filter: blur(0px); }
+            35%       { opacity: 1; filter: blur(0px); }
+            37%       { opacity: 0.6; filter: blur(0.8px); }
+            39%       { opacity: 1; filter: blur(0px); }
+            72%       { opacity: 1; filter: blur(0px); }
+            73%       { opacity: 0.76; filter: blur(0.4px); }
+            74%       { opacity: 1; filter: blur(0px); }
+        }
         .pip-iframe-wrapper {
             flex: 1;
             position: relative;
@@ -1803,6 +1816,7 @@
                 );
             background-size: 100% 16px, 16px 100%;
             mix-blend-mode: screen;
+            animation: crtFlicker 8s infinite;
         }
         .pip-iframe-wrapper::before {
             content: '';
