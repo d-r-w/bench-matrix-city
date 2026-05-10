@@ -1785,22 +1785,23 @@
             inset: 0;
             pointer-events: none;
             z-index: 1;
+            /* Fixed 16px spacing — CRT intensity locked at 0.45 */
             background:
                 repeating-linear-gradient(
                     0deg,
                     transparent,
-                    transparent 2px,
-                    rgba(0, 255, 0, 0.03) 2px,
-                    rgba(0, 255, 0, 0.03) 4px
+                    transparent 8.3px,
+                    rgba(0, 255, 0, 0.155) 10.5px,
+                    transparent 16px
                 ),
                 repeating-linear-gradient(
                     90deg,
                     transparent,
-                    transparent 2px,
-                    rgba(0, 255, 0, 0.01) 2px,
-                    rgba(0, 255, 0, 0.01) 4px
+                    transparent 10.5px,
+                    rgba(0, 255, 0, 0.057) 12.7px,
+                    transparent 16px
                 );
-            background-size: 100% 4px, 4px 100%;
+            background-size: 100% 16px, 16px 100%;
             mix-blend-mode: screen;
         }
         .pip-iframe-wrapper::before {
@@ -1811,8 +1812,8 @@
             z-index: 1;
             background: radial-gradient(
                 ellipse at center,
-                transparent 60%,
-                rgba(0, 15, 0, 0.25) 100%
+                transparent 49%,
+                rgba(0, 15, 0, 0.22) 100%
             );
         }
         .pip-resize-handle {
