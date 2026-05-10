@@ -1906,6 +1906,7 @@
     <script>
         (() => {
             const MIN_W = 200, MIN_H = 150;
+            let activeResizeHandle = null;
 
             document.querySelectorAll('.pip-container').forEach(container => {
                 const header = container.querySelector('.pip-header');
@@ -1927,12 +1928,16 @@
 
                 // --- Resizing ---
                 resizeHandle.addEventListener('mousedown', e => {
+                    activeResizeHandle = resizeHandle;
                     resizeHandle._resizing = true;
                     resizeHandle._rx = e.clientX;
                     resizeHandle._ry = e.clientY;
                     resizeHandle._sw = container.offsetWidth;
                     resizeHandle._sh = container.offsetHeight;
                     e.preventDefault();
+                    e.stopPropagation();
+                    // Capture all mouse events to this element so iframes can't steal them
+                    resizeHandle.setCapture?.(true);
                 });
 
                 // --- Minimize / Restore ---
@@ -1976,6 +1981,7 @@
             });
 
             document.addEventListener('mouseup', () => {
+                activeResizeHandle = null;
                 document.querySelectorAll('.pip-container').forEach(container => {
                     container.querySelector('.pip-header')._dragging = false;
                     container.querySelector('.pip-resize-handle')._resizing = false;
