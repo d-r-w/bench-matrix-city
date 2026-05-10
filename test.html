@@ -598,7 +598,7 @@
             const h = maxH * 0.32;
 
             // Main box + horizontal ledges at intervals for architectural detail
-            const group = new THREE.Group();
+            const group = new THREE.Group(); // TODO: These sometimes improperly exceed building height - fix
 
             // Main building body (slightly inset from full width to leave room for ledges)
             const bodyW = BUILDING_WIDTH - 0.1;
@@ -991,7 +991,6 @@
         }
 
         // ── Main city builder ─────────────────────────────────────────
-
         function buildCity() {
             const half = Math.floor(GRID / 2);
 
