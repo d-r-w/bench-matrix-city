@@ -72,6 +72,41 @@
 
 
         const { texture: atlasTex } = buildTextureAtlas();
+        const charStreamTex = buildCharStreamTexture();
+
+        function buildCharStreamTexture() {
+            const cols = 16;
+            const rows = 2;
+            const w = cols * CELL_SIZE;
+            const h = rows * CELL_SIZE;
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            const ctx = c.getContext('2d');
+
+            for (let col = 0; col < cols; col++) {
+                for (let row = 0; row < rows; row++) {
+                    const ch = CHARS[Math.floor(Math.random() * CHARS.length)];
+                    const x = col * CELL_SIZE + CELL_SIZE / 2;
+                    const y = row * CELL_SIZE + CELL_SIZE / 2 + 4;
+
+                    ctx.shadowColor = '#00ff41';
+                    ctx.shadowBlur = 6;
+                    ctx.fillStyle = '#55ff77';
+                    ctx.font = `${CELL_SIZE * 0.7}px monospace`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(ch, x, y);
+                }
+            }
+
+            const tex = new THREE.CanvasTexture(c);
+            tex.minFilter = THREE.NearestFilter;
+            tex.magFilter = THREE.NearestFilter;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.flipY = false;
+            tex.generateMipmaps = false;
+            return tex;
+        }
 
         function buildTextureAtlas() {
             const w = ATLAS_COLS * CELL_SIZE;
@@ -1361,6 +1396,7 @@
         }
 
         function buildLightBeams() {
+            // --- Core beam geometry (tapered cylinder) ---
             const beamGeo = new THREE.CylinderGeometry(0.08, 0.6, 100, 8, 1, true);
             const beamMat = new THREE.ShaderMaterial({
                 uniforms: {
@@ -1397,6 +1433,72 @@
                 blending: THREE.AdditiveBlending
             });
 
+            // --- Halo geometry (wider, dimmer cylinder for volumetric glow) ---
+            const haloGeo = new THREE.CylinderGeometry(0.3, 1.5, 100, 8, 1, true);
+            const haloMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uColor: { value: new THREE.Color(0x00ff41) }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform vec3 uColor;
+                    varying vec2 vUv;
+                    void main() {
+                        float alpha = (1.0 - vUv.y) * 0.03;
+                        float radial = 1.0 - abs(vUv.x - 0.5) * 2.0;
+                        radial = smoothstep(0.0, 1.0, radial);
+                        float pulse = 0.8 + 0.2 * sin(uTime * 1.5);
+                        alpha *= radial * pulse;
+                        gl_FragColor = vec4(uColor, alpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending
+            });
+
+            // --- Character stream planes (glyphs flowing upward) ---
+            const charStreamMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uAtlas: { value: charStreamTex }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform sampler2D uAtlas;
+                    varying vec2 vUv;
+                    void main() {
+                        float scrollSpeed = 0.4;
+                        vec2 uv = vUv;
+                        uv.y -= fract(uTime * scrollSpeed);
+                        vec4 texel = texture(uAtlas, uv);
+                        float fade = sin(vUv.y * 3.14159);
+                        float alpha = texel.a * fade * 0.12;
+                        gl_FragColor = vec4(texel.rgb, alpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending
+            });
+
             const isAvenue = (i) => Math.abs(i) % 6 === 0;
             const beams = [];
 
@@ -1405,12 +1507,38 @@
                     if (isAvenue(ix) && isAvenue(iz)) {
                         // Only place a beam ~40% of the time for sparser distribution
                         if (Math.random() > 0.4) continue;
+
+                        const group = new THREE.Group();
+                        group.position.set(ix * CELL, 35, iz * CELL);
+
+                        // Core beam
                         const mat = beamMat.clone();
                         mat.uniforms.uTime.value = Math.random() * 10;
                         const beam = new THREE.Mesh(beamGeo, mat);
-                        beam.position.set(ix * CELL, 35, iz * CELL);
-                        scene.add(beam);
-                        beams.push(beam);
+                        group.add(beam);
+
+                        // Halo (wider glow behind the core)
+                        const haloMatClone = haloMat.clone();
+                        haloMatClone.uniforms.uTime.value = Math.random() * 10;
+                        const halo = new THREE.Mesh(haloGeo, haloMatClone);
+                        group.add(halo);
+
+                        // Character stream planes (4 sides)
+                        for (let s = 0; s < 4; s++) {
+                            const csMat = charStreamMat.clone();
+                            csMat.uniforms.uTime.value = Math.random() * 10;
+                            const plane = new THREE.Mesh(
+                                new THREE.PlaneGeometry(0.8, 100),
+                                csMat
+                            );
+                            plane.rotation.y = (s * Math.PI) / 2;
+                            plane.position.x = Math.cos((s * Math.PI) / 2) * 0.7;
+                            plane.position.z = Math.sin((s * Math.PI) / 2) * 0.7;
+                            group.add(plane);
+                        }
+
+                        scene.add(group);
+                        beams.push(group);
                     }
                 }
             }
@@ -1582,11 +1710,16 @@
             }
 
             if (window._lightBeams) {
-                for (const beam of window._lightBeams) {
-                    beam.material.uniforms.uTime.value = t;
+                for (const group of window._lightBeams) {
                     // Subtle rotation and height pulse for dynamic atmosphere
-                    beam.rotation.y += dt * 0.04;
-                    beam.position.y = 40 + Math.sin(t * 0.3 + beam.id) * 2;
+                    group.rotation.y += dt * 0.04;
+                    group.position.y = 40 + Math.sin(t * 0.3 + group.id) * 2;
+                    // Update time uniforms on all children (core, halo, char streams)
+                    for (const child of group.children) {
+                        if (child.material && child.material.uniforms && child.material.uniforms.uTime) {
+                            child.material.uniforms.uTime.value = t;
+                        }
+                    }
                 }
             }
 
