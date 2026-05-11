@@ -621,6 +621,99 @@
             return vehicle;
         }
 
+        function createPoliceDrone() {
+            const group = new THREE.Group();
+
+            // Dark body — flat hexagonal disc
+            const bodyGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.12, 6);
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color: 0x1a1a2a,
+                roughness: 0.4,
+                metalness: 0.8,
+            });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            group.add(body);
+
+            // Central dome (radome)
+            const domeGeo = new THREE.SphereGeometry(0.15, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+            const domeMat = new THREE.MeshBasicMaterial({
+                color: 0x334455,
+                transparent: true,
+                opacity: 0.6,
+            });
+            const dome = new THREE.Mesh(domeGeo, domeMat);
+            group.add(dome);
+
+            // Red light (left)
+            const redGeo = new THREE.SphereGeometry(0.06, 6, 4);
+            const redMat = new THREE.MeshBasicMaterial({
+                color: 0xff2222,
+                transparent: true,
+                opacity: 0.9,
+            });
+            const redLight = new THREE.Mesh(redGeo, redMat);
+            redLight.position.set(-0.25, 0.1, 0);
+            group.add(redLight);
+
+            // Blue light (right)
+            const blueMat = new THREE.MeshBasicMaterial({
+                color: 0x2244ff,
+                transparent: true,
+                opacity: 0.9,
+            });
+            const blueLight = new THREE.Mesh(redGeo.clone(), blueMat);
+            blueLight.position.set(0.25, 0.1, 0);
+            group.add(blueLight);
+
+            // Searchlight cone underneath (volumetric beam)
+            const beamGeo = new THREE.CylinderGeometry(0.02, 1.5, 8, 8, 1, true);
+            const beamMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uColor: { value: new THREE.Color(0x88aaff) },
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform vec3 uColor;
+                    varying vec2 vUv;
+                    void main() {
+                        float alpha = (1.0 - vUv.y) * 0.06;
+                        float radial = 1.0 - abs(vUv.x - 0.5) * 2.0;
+                        radial = smoothstep(0.0, 1.0, radial);
+                        float pulse = 0.7 + 0.3 * sin(uTime * 4.0);
+                        alpha *= radial * pulse;
+                        gl_FragColor = vec4(uColor, alpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending,
+            });
+            const beam = new THREE.Mesh(beamGeo, beamMat);
+            beam.position.y = -4;
+            group.add(beam);
+
+            // Small point light for local illumination
+            const spotLight = new THREE.PointLight(0x88aaff, 0.3, 12);
+            spotLight.position.y = -2;
+            group.add(spotLight);
+
+            // Store references for animation
+            group.userData.redMat = redMat;
+            group.userData.blueMat = blueMat;
+            group.userData.beamMat = beamMat;
+
+            return group;
+        }
+
         // ── Main city builder ─────────────────────────────────────────
 
         // ── Geometry merging helper (avoids extra import) ───────────
@@ -1179,6 +1272,100 @@
                 scene.add(createVehicle());
             }
             window._vehicles = scene.children.filter(c => c.userData.flyAxis !== undefined);
+
+            // ── Police drones on patrol curves similar to camera path ─
+            buildPoliceDrones();
+        }
+
+
+        function buildPoliceDrones() {
+            const half = Math.floor(GRID / 2);
+            const roadCenter = (idx) => idx * CELL;
+
+            // Helper: build a waypoint array for a patrol route (same pattern as camera)
+            function makePatrolPath(varyRanges) {
+                const pts = [];
+                let segIdx = 0;
+                for (const { fixedAxis, fixedIdx, varyStart, varyEnd, step } of varyRanges) {
+                    for (let v = varyStart; step > 0 ? v <= varyEnd : v >= varyEnd; v += step) {
+                        const h = 12 + ((Math.sin(segIdx * 0.4) + 1) / 2) * 25;
+                        segIdx++;
+                        const pt = fixedAxis === 'x'
+                            ? new THREE.Vector3(roadCenter(fixedIdx), h, roadCenter(v))
+                            : new THREE.Vector3(roadCenter(v), h, roadCenter(fixedIdx));
+                        // Skip duplicate consecutive points (segment boundaries)
+                        if (pts.length > 0 && pts[pts.length - 1].distanceTo(pt) < 0.01) continue;
+                        pts.push(pt);
+                    }
+                }
+                if (pts.length < 4) return null;
+                return new THREE.CatmullRomCurve3(pts, true);
+            }
+
+            // Define 3 patrol routes — parallel to camera but on different roads
+            const patrolRoutes = [
+                // Route 1: outer ring (x=2, z=6, x=-2, z=-4)
+                makePatrolPath([
+                    { fixedAxis: 'x', fixedIdx: 2, varyStart: -6, varyEnd: 4, step: 2 },
+                    { fixedAxis: 'z', fixedIdx: 4, varyStart: 2, varyEnd: 6, step: 2 },
+                    { fixedAxis: 'x', fixedIdx: 6, varyStart: 4, varyEnd: -6, step: -2 },
+                    { fixedAxis: 'z', fixedIdx: -6, varyStart: 6, varyEnd: -2, step: -2 },
+                    { fixedAxis: 'x', fixedIdx: -2, varyStart: -6, varyEnd: 0, step: 2 },
+                    { fixedAxis: 'z', fixedIdx: 0, varyStart: -2, varyEnd: 2, step: 2 },
+                    { fixedAxis: 'x', fixedIdx: 2, varyStart: 0, varyEnd: -6, step: -2 },
+                ]),
+                // Route 2: inner ring (x=-6, z=2, x=4, z=-2)
+                makePatrolPath([
+                    { fixedAxis: 'x', fixedIdx: -6, varyStart: -4, varyEnd: 2, step: 2 },
+                    { fixedAxis: 'z', fixedIdx: 2, varyStart: -6, varyEnd: 4, step: 2 },
+                    { fixedAxis: 'x', fixedIdx: 4, varyStart: 2, varyEnd: -4, step: -2 },
+                    { fixedAxis: 'z', fixedIdx: -4, varyStart: 4, varyEnd: -6, step: -2 },
+                    { fixedAxis: 'x', fixedIdx: -4, varyStart: -4, varyEnd: 0, step: 2 },
+                    { fixedAxis: 'z', fixedIdx: 0, varyStart: -4, varyEnd: -6, step: -2 },
+                    { fixedAxis: 'x', fixedIdx: -6, varyStart: 0, varyEnd: -4, step: -2 },
+                ]),
+                // Route 3: center sweep (x=0, z=-2, x=-8, z=6)
+                makePatrolPath([
+                    { fixedAxis: 'x', fixedIdx: 0, varyStart: -2, varyEnd: 6, step: 2 },
+                    { fixedAxis: 'z', fixedIdx: 6, varyStart: 0, varyEnd: -8, step: -2 },
+                    { fixedAxis: 'x', fixedIdx: -8, varyStart: 6, varyEnd: -2, step: -2 },
+                    { fixedAxis: 'z', fixedIdx: -2, varyStart: -8, varyEnd: 0, step: 2 },
+                ]),
+            ];
+
+            const NUM_DRONES = 6;
+            const drones = [];
+
+            // Filter out any null curves (routes with too few points)
+            const validRoutes = patrolRoutes.filter(c => c !== null);
+
+            for (let i = 0; i < NUM_DRONES; i++) {
+                const drone = createPoliceDrone();
+                if (validRoutes.length === 0) { scene.remove(drone); continue; }
+                const curve = validRoutes[i % validRoutes.length];
+
+                // Each drone starts at a different position along its route
+                const startT = (i / NUM_DRONES) + ((i % validRoutes.length) * 0.15);
+                const speed = 0.00008 + Math.random() * 0.00006;
+
+                // Alternate direction for variety
+                const dir = i % 2 === 0 ? 1 : -1;
+
+                drone.userData.curve = curve;
+                drone.userData.t = startT % 1;
+                drone.userData.speed = speed;
+                drone.userData.dir = dir;
+                drone.userData.blinkPhase = Math.random() * Math.PI * 2;
+
+                // Set initial position
+                const pt = curve.getPointAt(drone.userData.t);
+                drone.position.copy(pt);
+
+                scene.add(drone);
+                drones.push(drone);
+            }
+
+            window._policeDrones = drones;
         }
 
 
@@ -1875,6 +2062,37 @@
                     v.position.y += (v.userData.flyY - v.position.y) * dt * 0.5;
                     // Subtle bob
                     v.position.y += Math.sin(t * 2 + v.id) * 0.01;
+                }
+            }
+
+            // Animate police drones along patrol curves
+            if (window._policeDrones) {
+                for (const drone of window._policeDrones) {
+                    const curve = drone.userData.curve;
+                    drone.userData.t = (drone.userData.t + drone.userData.speed * drone.userData.dir) % 1;
+                    if (drone.userData.t < 0) drone.userData.t += 1;
+
+                    const pt = curve.getPointAt(drone.userData.t);
+                    drone.position.lerp(pt, 0.15);
+
+                    // Look ahead along curve
+                    let lookT = (drone.userData.t + 0.02 * drone.userData.dir) % 1;
+                    if (lookT < 0) lookT += 1;
+                    const lookPt = curve.getPointAt(lookT);
+                    drone.lookAt(lookPt);
+
+                    // Blink red/blue lights alternately (siren effect)
+                    const blink = Math.sin(t * 6 + drone.userData.blinkPhase);
+                    drone.userData.redMat.opacity = blink > 0 ? 1.0 : 0.15;
+                    drone.userData.blueMat.opacity = blink < 0 ? 1.0 : 0.15;
+
+                    // Update searchlight beam time uniform
+                    if (drone.userData.beamMat) {
+                        drone.userData.beamMat.uniforms.uTime.value = t;
+                    }
+
+                    // Subtle hover bob
+                    drone.position.y += Math.sin(t * 3 + drone.userData.blinkPhase) * 0.02;
                 }
             }
 
