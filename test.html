@@ -21,6 +21,30 @@
             text-shadow: 0 0 5px #f44; z-index: 20; display: none;
             text-align: center; max-width: 80vw;
         }
+        #steer-toggle {
+            position: fixed; top: 16px; left: 16px;
+            z-index: 300;
+            background: rgba(0, 8, 2, 0.7);
+            border: 1px solid #0f04;
+            color: #0a0;
+            font-family: monospace; font-size: 13px; letter-spacing: 1px;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            backdrop-filter: blur(4px);
+            transition: all 0.2s;
+        }
+        #steer-toggle:hover {
+            background: rgba(0, 255, 65, 0.1);
+            border-color: #0f08;
+            color: #0f0;
+        }
+        #steer-toggle.active {
+            background: rgba(0, 255, 65, 0.15);
+            border-color: #0f0a;
+            color: #0f0;
+            box-shadow: 0 0 12px rgba(0, 255, 65, 0.2);
+        }
     </style>
     <script type="importmap">
         {
@@ -50,6 +74,15 @@
 
         let scene, camera, renderer, composer;
         const clock = new THREE.Clock();
+
+        // ── Manual steering state (shared between init() and fly()) ──
+        let manualSteering = false;
+        const mouseNDC = { x: 0, y: 0 };
+        // Free-flight state
+        const freePos = new THREE.Vector3();
+        let freeYaw = 0;       // horizontal rotation
+        let freePitch = 0;     // vertical tilt (radians)
+        const freeSpeed = 1.5;   // world units / sec
 
 
         const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' +
@@ -276,6 +309,32 @@
             setTimeout(startDroneFlythrough, 600);
 
             addEventListener('resize', onResize);
+
+            // ── Manual steering toggle + mouse tracking ──
+            const steerBtn = document.createElement('button');
+            steerBtn.id = 'steer-toggle';
+            steerBtn.textContent = '[ STEER ]';
+            document.body.appendChild(steerBtn);
+
+            steerBtn.addEventListener('click', () => {
+                manualSteering = !manualSteering;
+                steerBtn.classList.toggle('active', manualSteering);
+                steerBtn.textContent = manualSteering ? '[ STEER ON ]' : '[ STEER ]';
+
+                if (manualSteering) {
+                    // Capture current camera position and heading for free flight
+                    freePos.copy(camera.position);
+                    const camForward = new THREE.Vector3();
+                    camera.getWorldDirection(camForward);
+                    freeYaw = Math.atan2(-camForward.x, -camForward.z);
+                    freePitch = Math.asin(camForward.y);
+                }
+            });
+
+            addEventListener('mousemove', (e) => {
+                mouseNDC.x = (e.clientX / innerWidth) * 2 - 1;
+                mouseNDC.y = (e.clientY / innerHeight) * 2 - 1;
+            });
         }
 
 
@@ -1598,38 +1657,102 @@
             const _lookTarget = new THREE.Vector3();
             let smoothBank = 0;
 
+            // Grid bounds for bounce detection
+            const halfGrid = (GRID / 2) * CELL;
+
+            // Reusable vectors to avoid GC pressure in the fly loop
+            const _forward = new THREE.Vector3();
+            const _right = new THREE.Vector3();
+
+            let lastFlyTime = performance.now();
+
             function fly() {
+                const now = performance.now();
+                const dtSec = Math.min((now - lastFlyTime) / 1000, 0.1); // cap at 100ms
+                lastFlyTime = now;
+
                 t = (t + baseSpeed) % 1;
 
-                // ── Position: lerp toward curve point (no snapping) ──
-                _posTarget.copy(curve.getPointAt(t));
-                camera.position.lerp(_posTarget, 0.1);
+                if (manualSteering) {
+                    // ── Free flight: move forward in facing direction ──
 
-                // ── Look-ahead: lerp toward a point further along the curve ──
-                const lookT = (t + 0.04) % 1;
-                _lookTarget.lerp(curve.getPointAt(lookT), 0.08);
-                // Tilt down only when flying above mid-range (height > 20)
-                const midH = 20;
-                if (camera.position.y > midH) {
-                    const excess = camera.position.y - midH;
-                    _lookTarget.y = camera.position.y - (excess * 0.6);
+                    // Mouse gently adjusts yaw & pitch toward cursor position
+                    const steerRate = 1.8; // radians/sec sensitivity
+                    freeYaw += -mouseNDC.x * steerRate * dtSec;
+                    freePitch += -mouseNDC.y * steerRate * 0.6 * dtSec;
+                    // Clamp pitch to avoid flipping
+                    freePitch = Math.max(-1.2, Math.min(1.2, freePitch));
+
+                    // Compute forward direction from yaw + pitch
+                    _forward.set(
+                        -Math.sin(freeYaw) * Math.cos(freePitch),
+                        Math.sin(freePitch),
+                        -Math.cos(freeYaw) * Math.cos(freePitch)
+                    );
+
+                    // Move forward
+                    freePos.addScaledVector(_forward, freeSpeed * dtSec);
+
+                    // ── World bound bounce (invert direction on axis) ──
+                    if (freePos.x > halfGrid) {
+                        freePos.x = halfGrid;
+                        freeYaw += Math.PI;
+                    } else if (freePos.x < -halfGrid) {
+                        freePos.x = -halfGrid;
+                        freeYaw += Math.PI;
+                    }
+                    if (freePos.z > halfGrid) {
+                        freePos.z = halfGrid;
+                        freeYaw += Math.PI;
+                    } else if (freePos.z < -halfGrid) {
+                        freePos.z = -halfGrid;
+                        freeYaw += Math.PI;
+                    }
+
+                    // Apply position & orientation
+                    camera.position.copy(freePos);
+
+                    // Look target = current pos + forward direction (with slight distance)
+                    _lookTarget.copy(freePos).addScaledVector(_forward, 10);
+                    camera.lookAt(_lookTarget);
+
+                    // Banking from yaw rate (turn feel)
+                    const yawDelta = -mouseNDC.x * steerRate;
+                    smoothBank += (yawDelta * 0.15 - smoothBank) * 0.1;
+                    camera.rotateZ(smoothBank);
+
                 } else {
-                    _lookTarget.y = camera.position.y;
+                    // ── Normal curve flythrough ──
+                    const curvePoint = curve.getPointAt(t);
+                    _posTarget.copy(curvePoint);
+                    camera.position.lerp(_posTarget, 0.1);
+
+                    // Look-ahead along curve
+                    const lookT = (t + 0.04) % 1;
+                    _lookTarget.lerp(curve.getPointAt(lookT), 0.08);
+                    // Tilt down only when flying above mid-range (height > 20)
+                    const midH = 20;
+                    if (camera.position.y > midH) {
+                        const excess = camera.position.y - midH;
+                        _lookTarget.y = camera.position.y - (excess * 0.6);
+                    } else {
+                        _lookTarget.y = camera.position.y;
+                    }
+                    camera.lookAt(_lookTarget);
+
+                    // Banking from curve curvature
+                    const p1 = curve.getPointAt(t);
+                    const p2 = curve.getPointAt((t + 0.01) % 1);
+                    const p3 = curve.getPointAt((t + 0.02) % 1);
+                    const v1 = new THREE.Vector3().subVectors(p2, p1).normalize();
+                    const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
+                    const cross = new THREE.Vector3().crossVectors(v1, v2);
+
+                    let rawBank = cross.y * 0.5;
+                    rawBank = Math.max(-0.3, Math.min(0.3, rawBank));
+                    smoothBank += (rawBank - smoothBank) * 0.1;
+                    camera.rotateZ(smoothBank);
                 }
-                camera.lookAt(_lookTarget);
-
-                // ── Banking: smooth the raw curvature value over time ──
-                const p1 = curve.getPointAt(t);
-                const p2 = curve.getPointAt((t + 0.01) % 1);
-                const p3 = curve.getPointAt((t + 0.02) % 1);
-                const v1 = new THREE.Vector3().subVectors(p2, p1).normalize();
-                const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
-                const cross = new THREE.Vector3().crossVectors(v1, v2);
-
-                let rawBank = cross.y * 0.5;
-                rawBank = Math.max(-0.3, Math.min(0.3, rawBank));
-                smoothBank += (rawBank - smoothBank) * 0.1;
-                camera.rotateZ(smoothBank);
 
                 requestAnimationFrame(fly);
             }
