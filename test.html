@@ -665,12 +665,11 @@
             blueLight.position.set(0.25, 0.1, 0);
             group.add(blueLight);
 
-            // Searchlight cone underneath (volumetric beam)
-            const beamGeo = new THREE.CylinderGeometry(0.02, 1.5, 8, 8, 1, true);
+            // Searchlight cone underneath (volumetric green scanner beam)
+            const beamGeo = new THREE.CylinderGeometry(0.02, 1.8, 10, 8, 1, true);
             const beamMat = new THREE.ShaderMaterial({
                 uniforms: {
                     uTime: { value: 0 },
-                    uColor: { value: new THREE.Color(0x88aaff) },
                 },
                 vertexShader: `
                     varying vec2 vUv;
@@ -681,15 +680,55 @@
                 `,
                 fragmentShader: `
                     uniform float uTime;
-                    uniform vec3 uColor;
                     varying vec2 vUv;
+
+                    // Simple hash for scan-line noise
+                    float hash(float n) { return fract(sin(n) * 43758.5453); }
+
                     void main() {
-                        float alpha = (1.0 - vUv.y) * 0.06;
+                        vec3 green = vec3(0.0, 1.0, 0.25);
+                        vec3 brightGreen = vec3(0.15, 1.0, 0.4);
+
+                        // Base cone fade — brighter at bottom (ground)
+                        float heightFade = 1.0 - vUv.y;
+
+                        // Radial falloff — center of beam is brightest
                         float radial = 1.0 - abs(vUv.x - 0.5) * 2.0;
                         radial = smoothstep(0.0, 1.0, radial);
-                        float pulse = 0.7 + 0.3 * sin(uTime * 4.0);
-                        alpha *= radial * pulse;
-                        gl_FragColor = vec4(uColor, alpha);
+
+                        // ── Scanning horizontal band that sweeps up and down ──
+                        float scanPos = fract(uTime * 0.6);
+                        float scanDist = abs(vUv.y - scanPos);
+                        float scanLine = smoothstep(0.04, 0.0, scanDist);
+                        // Secondary thinner bright line
+                        float thinScan = smoothstep(0.012, 0.0, scanDist);
+
+                        // ── Vertical scan lines (like a radar grid) ──
+                        float vLines = step(0.92, fract(vUv.x * 12.0 + uTime * 0.5));
+
+                        // ── Random data flicker in the beam ──
+                        float cellX = floor(vUv.x * 8.0);
+                        float cellY = floor((1.0 - vUv.y) * 20.0);
+                        float cellId = cellX + cellY * 8.0;
+                        float flicker = step(0.7, hash(cellId + floor(uTime * 3.0)));
+
+                        // ── Compose alpha ──
+                        float baseAlpha = heightFade * radial * 0.04;
+                        float scanAlpha = scanLine * heightFade * 0.18 + thinScan * heightFade * 0.25;
+                        float vLineAlpha = vLines * radial * heightFade * 0.03;
+                        float flickerAlpha = flicker * radial * heightFade * 0.02;
+
+                        float alpha = baseAlpha + scanAlpha + vLineAlpha + flickerAlpha;
+
+                        // Color: bright green on the scan line, standard green elsewhere
+                        vec3 col = mix(green, brightGreen, scanLine + thinScan * 0.5);
+                        col += vLines * vec3(0.1, 0.3, 0.1);
+
+                        // Pulse the whole beam subtly
+                        float pulse = 0.85 + 0.15 * sin(uTime * 2.5);
+                        alpha *= pulse;
+
+                        gl_FragColor = vec4(col, alpha);
                     }
                 `,
                 transparent: true,
@@ -698,18 +737,82 @@
                 blending: THREE.AdditiveBlending,
             });
             const beam = new THREE.Mesh(beamGeo, beamMat);
-            beam.position.y = -4;
+            beam.position.y = -5;
             group.add(beam);
 
-            // Small point light for local illumination
-            const spotLight = new THREE.PointLight(0x88aaff, 0.3, 12);
-            spotLight.position.y = -2;
+            // Ground-level scan disc — where the spotlight hits the ground
+            const discGeo = new THREE.RingGeometry(0.1, 2.5, 32);
+            const discMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    varying vec2 vUv;
+
+                    void main() {
+                        // Polar coordinates centered on disc
+                        vec2 center = vUv - 0.5;
+                        float dist = length(center) * 2.0; // 0..1
+                        float angle = atan(center.y, center.x);
+
+                        vec3 green = vec3(0.0, 1.0, 0.25);
+                        vec3 brightGreen = vec3(0.2, 1.0, 0.4);
+
+                        // Radial fade — edge of disc is dimmer
+                        float radialFade = 1.0 - dist;
+                        radialFade = smoothstep(0.0, 1.0, radialFade);
+
+                        // ── Concentric scan rings that expand outward ──
+                        float ringPos = fract(uTime * 0.5);
+                        float ringDist2 = abs(dist - ringPos);
+                        float expandingRing = smoothstep(0.03, 0.0, ringDist2);
+
+                        // ── Grid lines on the disc ──
+                        float gridX = step(0.95, fract(vUv.x * 16.0));
+                        float gridY = step(0.95, fract(vUv.y * 16.0));
+                        float grid = max(gridX, gridY);
+
+                        // ── Compose alpha ──
+                        float baseAlpha = radialFade * 0.06;
+                        float expandAlpha = expandingRing * radialFade * 0.2;
+                        float gridAlpha = grid * radialFade * 0.04;
+
+                        float alpha = baseAlpha + expandAlpha + gridAlpha;
+
+                        // Color: bright green on expanding rings, standard elsewhere
+                        vec3 col = mix(green, brightGreen, expandingRing);
+
+                        gl_FragColor = vec4(col, alpha);
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending,
+            });
+            const disc = new THREE.Mesh(discGeo, discMat);
+            disc.rotation.x = -Math.PI / 2;
+            disc.position.y = -10;
+            group.add(disc);
+
+            // Green point light for local illumination
+            const spotLight = new THREE.PointLight(0x00ff44, 0.5, 15);
+            spotLight.position.y = -3;
             group.add(spotLight);
 
             // Store references for animation
             group.userData.redMat = redMat;
             group.userData.blueMat = blueMat;
             group.userData.beamMat = beamMat;
+            group.userData.discMat = discMat;
 
             return group;
         }
@@ -2086,9 +2189,12 @@
                     drone.userData.redMat.opacity = blink > 0 ? 1.0 : 0.15;
                     drone.userData.blueMat.opacity = blink < 0 ? 1.0 : 0.15;
 
-                    // Update searchlight beam time uniform
+                    // Update searchlight beam + ground disc time uniforms
                     if (drone.userData.beamMat) {
                         drone.userData.beamMat.uniforms.uTime.value = t;
+                    }
+                    if (drone.userData.discMat) {
+                        drone.userData.discMat.uniforms.uTime.value = t;
                     }
 
                     // Subtle hover bob
