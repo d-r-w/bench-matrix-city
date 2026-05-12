@@ -1882,8 +1882,8 @@
             for (let ix = -GRID; ix <= GRID; ix++) {
                 for (let iz = -GRID; iz <= GRID; iz++) {
                     if (isAvenue(ix) && isAvenue(iz)) {
-                        // Only place a beam ~40% of the time for sparser distribution
-                        if (Math.random() > 0.4) continue;
+                        // Only place a beam ~20% of the time for sparser distribution
+                        if (Math.random() > 0.2) continue;
 
                         const group = new THREE.Group();
                         group.position.set(ix * CELL, 35, iz * CELL);
