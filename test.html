@@ -694,11 +694,12 @@
             halo.position.y = 0;
             group.add(halo);
 
-            // Searchlight cone underneath (volumetric green scanner beam)
+            // Searchlight cone underneath (volumetric scanner beam — turns red when POV camera is within it)
             const beamGeo = new THREE.CylinderGeometry(0.02, 1.8, 10, 8, 1, true);
             const beamMat = new THREE.ShaderMaterial({
                 uniforms: {
                     uTime: { value: 0 },
+                    uProximity: { value: 0.0 },
                 },
                 vertexShader: `
                     varying vec2 vUv;
@@ -709,6 +710,7 @@
                 `,
                 fragmentShader: `
                     uniform float uTime;
+                    uniform float uProximity;
                     varying vec2 vUv;
 
                     // Simple hash for scan-line noise
@@ -717,6 +719,11 @@
                     void main() {
                         vec3 green = vec3(0.0, 1.0, 0.25);
                         vec3 brightGreen = vec3(0.15, 1.0, 0.4);
+                        vec3 red = vec3(1.0, 0.08, 0.05);
+                        vec3 brightRed = vec3(1.0, 0.25, 0.15);
+
+                        vec3 baseGreen = mix(green, red, uProximity);
+                        vec3 brightColor = mix(brightGreen, brightRed, uProximity);
 
                         // Base cone fade — brighter at bottom (ground)
                         float heightFade = 1.0 - vUv.y;
@@ -749,12 +756,14 @@
 
                         float alpha = baseAlpha + scanAlpha + vLineAlpha + flickerAlpha;
 
-                        // Color: bright green on the scan line, standard green elsewhere
-                        vec3 col = mix(green, brightGreen, scanLine + thinScan * 0.5);
-                        col += vLines * vec3(0.1, 0.3, 0.1);
+                        // Color: bright on the scan line, standard elsewhere — green or red based on proximity
+                        vec3 col = mix(baseGreen, brightColor, scanLine + thinScan * 0.5);
+                        vec3 vLineColor = mix(vec3(0.1, 0.3, 0.1), vec3(0.4, 0.05, 0.02), uProximity);
+                        col += vLines * vLineColor;
 
-                        // Pulse the whole beam subtly
-                        float pulse = 0.85 + 0.15 * sin(uTime * 2.5);
+                        // Pulse the whole beam subtly (faster pulse when red/alert)
+                        float pulseFreq = mix(2.5, 6.0, uProximity);
+                        float pulse = 0.85 + 0.15 * sin(uTime * pulseFreq);
                         alpha *= pulse;
 
                         gl_FragColor = vec4(col, alpha);
@@ -774,6 +783,7 @@
             const discMat = new THREE.ShaderMaterial({
                 uniforms: {
                     uTime: { value: 0 },
+                    uProximity: { value: 0.0 },
                 },
                 vertexShader: `
                     varying vec2 vUv;
@@ -784,6 +794,7 @@
                 `,
                 fragmentShader: `
                     uniform float uTime;
+                    uniform float uProximity;
                     varying vec2 vUv;
 
                     void main() {
@@ -794,6 +805,11 @@
 
                         vec3 green = vec3(0.0, 1.0, 0.25);
                         vec3 brightGreen = vec3(0.2, 1.0, 0.4);
+                        vec3 red = vec3(1.0, 0.08, 0.05);
+                        vec3 brightRed = vec3(1.0, 0.3, 0.15);
+
+                        vec3 baseGreen = mix(green, red, uProximity);
+                        vec3 brightColor = mix(brightGreen, brightRed, uProximity);
 
                         // Radial fade — edge of disc is dimmer
                         float radialFade = 1.0 - dist;
@@ -816,8 +832,8 @@
 
                         float alpha = baseAlpha + expandAlpha + gridAlpha;
 
-                        // Color: bright green on expanding rings, standard elsewhere
-                        vec3 col = mix(green, brightGreen, expandingRing);
+                        // Color: bright on expanding rings — green or red based on proximity
+                        vec3 col = mix(baseGreen, brightColor, expandingRing);
 
                         gl_FragColor = vec4(col, alpha);
                     }
@@ -841,6 +857,7 @@
             group.userData.haloMat = haloMat;
             group.userData.beamMat = beamMat;
             group.userData.discMat = discMat;
+            group.userData.spotLight = spotLight;
 
             return group;
         }
@@ -2223,6 +2240,37 @@
                     }
                     if (drone.userData.discMat) {
                         drone.userData.discMat.uniforms.uTime.value = t;
+                    }
+
+                    // ── Proximity detection: turn beam red when POV camera is within the beam ──
+                    const camPos = camera.position;
+                    // Horizontal distance from camera to drone center
+                    const hDist = Math.sqrt(
+                        (camPos.x - drone.position.x) ** 2 +
+                        (camPos.z - drone.position.z) ** 2
+                    );
+                    // How far down the beam the camera sits (0 = drone level, 1 = beam bottom)
+                    // Clamped so camera above/below the beam cone gets zero proximity
+                    const depthFrac = Math.max(0, Math.min(1, (drone.position.y - camPos.y) / 10));
+                    // Beam radius at camera depth (tapers from 0.02 at top to 1.8 at bottom)
+                    const radiusAtDepth = 0.02 + (1.8 - 0.02) * depthFrac;
+                    // Normalized proximity: 1 = camera inside beam, 0 = far outside
+                    let prox = Math.max(0, 1 - hDist / (radiusAtDepth * 2.5));
+                    prox = Math.pow(prox, 0.6); // Soften the falloff
+                    prox = Math.min(1, prox);
+
+                    if (drone.userData.beamMat) {
+                        drone.userData.beamMat.uniforms.uProximity.value = prox;
+                    }
+                    if (drone.userData.discMat) {
+                        drone.userData.discMat.uniforms.uProximity.value = prox;
+                    }
+                    // Also tint the spot light red when camera is in beam
+                    if (drone.userData.spotLight) {
+                        const r = Math.round(0x00 + prox * 0xff);
+                        const g = Math.round(0xff - prox * 0xf8);
+                        const b = Math.round(0x44 + prox * 0x1c);
+                        drone.userData.spotLight.color.setRGB(r / 255, g / 255, b / 255);
                     }
 
                     // Subtle hover bob
