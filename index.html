@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>The Matrix City</title>
+    <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+    <div id="loading">[ CONNECTING TO THE MATRIX ]</div>
+    <div id="error"></div>
+
+    <!-- Picture-in-Picture YouTube Embeds -->
+    <div class="pip-container" style="bottom: 20px; right: 20px;">
+        <div class="pip-header">
+            <span class="pip-title">▶ FEED 1</span>
+            <div class="pip-controls">
+                <button class="pip-btn pip-zoom" title="Zoom">🔍</button>
+                <button class="pip-btn pip-toggle" title="Minimize/Restore">−</button>
+                <button class="pip-btn pip-close close" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="pip-iframe-wrapper">
+            <iframe
+                src="https://www.youtube.com/embed/iEpJwprxDdk?si=VVgydc8Lh-uZQnk1&controls=1"
+                title="YouTube video player"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerpolicy="strict-origin-when-cross-origin"
+                allowfullscreen
+            ></iframe>
+            <div class="pan-arrows">
+                <button class="pan-arrow up" title="Pan up">▲</button>
+                <button class="pan-arrow down" title="Pan down">▼</button>
+                <button class="pan-arrow left" title="Pan left">◀</button>
+                <button class="pan-arrow right" title="Pan right">▶</button>
+            </div>
+            <div class="pip-resize-handle"></div>
+        </div>
+    </div>
+
+    <div class="pip-container" style="bottom: 20px; right: 400px;">
+        <div class="pip-header">
+            <span class="pip-title">▶ FEED 2</span>
+            <div class="pip-controls">
+                <button class="pip-btn pip-zoom" title="Zoom">🔍</button>
+                <button class="pip-btn pip-toggle" title="Minimize/Restore">−</button>
+                <button class="pip-btn pip-close close" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="pip-iframe-wrapper">
+            <iframe
+                src="https://www.youtube.com/embed/dzylsC0KcOE?si=rKbjFsFWMpyc_ACT&controls=1"
+                title="YouTube video player"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerpolicy="strict-origin-when-cross-origin"
+                allowfullscreen
+            ></iframe>
+            <div class="pan-arrows">
+                <button class="pan-arrow up" title="Pan up">▲</button>
+                <button class="pan-arrow down" title="Pan down">▼</button>
+                <button class="pan-arrow left" title="Pan left">◀</button>
+                <button class="pan-arrow right" title="Pan right">▶</button>
+            </div>
+            <div class="pip-resize-handle"></div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/ui/pip-overlay.ts"></script>
+</body>
+</html>

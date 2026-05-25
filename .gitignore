@@ -1,0 +1,5 @@
+node_modules/
+dist/
+biome-docs/
+bun-docs/
+.DS_Store

@@ -1,0 +1,412 @@
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: #000;
+  cursor: pointer;
+}
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+#loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #0f0;
+  font-family: monospace;
+  font-size: 24px;
+  pointer-events: none;
+  text-shadow:
+    0 0 10px #0f0,
+    0 0 20px #0f0,
+    0 0 40px #0a0;
+  z-index: 10;
+  letter-spacing: 4px;
+  animation: pulse 1.5s ease-in-out infinite;
+  background: rgba(0, 8, 2, 0.6);
+  padding: 20px 40px;
+  border: 1px solid #0f03;
+  backdrop-filter: blur(4px);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+#error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #f44;
+  font-family: monospace;
+  font-size: 18px;
+  pointer-events: none;
+  text-shadow: 0 0 5px #f44;
+  z-index: 20;
+  display: none;
+  text-align: center;
+  max-width: 80vw;
+}
+
+#steer-toggle {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 300;
+  background: rgba(0, 8, 2, 0.7);
+  border: 1px solid #0f04;
+  color: #0a0;
+  font-family: monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+  transition: all 0.2s;
+}
+
+#steer-toggle:hover {
+  background: rgba(0, 255, 65, 0.1);
+  border-color: #0f08;
+  color: #0f0;
+}
+
+#steer-toggle.active {
+  background: rgba(0, 255, 65, 0.15);
+  border-color: #0f0a;
+  color: #0f0;
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.2);
+}
+
+/* ── PiP Overlay Styles ── */
+
+.pip-container {
+  position: fixed;
+  width: 360px;
+  height: 270px;
+  background: #111;
+  border: 1px solid #0f03;
+  box-shadow:
+    0 0 20px rgba(0, 255, 0, 0.15),
+    0 4px 20px rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: box-shadow 0.2s;
+}
+
+.pip-container:hover {
+  box-shadow:
+    0 0 25px rgba(0, 255, 0, 0.3),
+    0 4px 25px rgba(0, 0, 0, 0.7);
+}
+
+.pip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: linear-gradient(180deg, #1a1a1a 0%, #111 100%);
+  cursor: grab;
+  user-select: none;
+  border-bottom: 1px solid #0f02;
+}
+
+.pip-header:active {
+  cursor: grabbing;
+}
+
+.pip-title {
+  color: #0f0;
+  font-family: monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.pip-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.pip-btn {
+  background: #0f02;
+  border: 1px solid #0f04;
+  color: #0f0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+
+.pip-btn:hover {
+  background: #0f04;
+  border-color: #0f08;
+}
+
+.pip-btn.close:hover {
+  background: #f443;
+  border-color: #f448;
+  color: #f44;
+}
+
+.pip-btn.zoom.active {
+  background: #0f08;
+  border-color: #0f0a;
+}
+
+/* ── Pan arrows (slide out when zoomed) ── */
+
+.pan-arrows {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.pan-arrow {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  background: rgba(0, 8, 2, 0.75);
+  border: 1px solid #0f04;
+  color: #0a0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  font-family: monospace;
+  pointer-events: auto;
+  transition:
+    opacity 0.35s ease,
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.15s,
+    border-color 0.15s;
+  backdrop-filter: blur(4px);
+}
+
+.pan-arrow:hover {
+  background: rgba(0, 255, 65, 0.15);
+  border-color: #0f08;
+  color: #0f0;
+}
+
+.pan-arrow:active {
+  background: rgba(0, 255, 65, 0.3);
+}
+
+.pan-arrow.up {
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-12px);
+}
+.pan-arrow.down {
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+}
+.pan-arrow.left {
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%) translateX(-12px);
+}
+.pan-arrow.right {
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%) translateX(12px);
+}
+
+/* Visible state — slide into position */
+.pan-arrows.visible .pan-arrow {
+  opacity: 1 !important;
+}
+
+.pan-arrows.visible .pan-arrow.up {
+  transform: translateX(-50%) translateY(0);
+}
+.pan-arrows.visible .pan-arrow.down {
+  transform: translateX(-50%) translateY(0);
+}
+.pan-arrows.visible .pan-arrow.left {
+  transform: translateY(-50%) translateX(0);
+}
+.pan-arrows.visible .pan-arrow.right {
+  transform: translateY(-50%) translateX(0);
+}
+
+/* Hidden state — slide out + fade */
+.pan-arrows:not(.visible) .pan-arrow {
+  opacity: 0;
+}
+
+/* Staggered animation delays */
+.pan-arrows.visible .pan-arrow.up {
+  transition-delay: 0.02s;
+}
+.pan-arrows.visible .pan-arrow.down {
+  transition-delay: 0.04s;
+}
+.pan-arrows.visible .pan-arrow.left {
+  transition-delay: 0.06s;
+}
+.pan-arrows.visible .pan-arrow.right {
+  transition-delay: 0.08s;
+}
+.pan-arrows:not(.visible) .pan-arrow {
+  transition-delay: 0s;
+}
+
+@keyframes crtFlicker {
+  0%,
+  100% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  2% {
+    opacity: 0.7;
+    filter: blur(0.6px);
+  }
+  4% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  6% {
+    opacity: 0.84;
+    filter: blur(0.3px);
+  }
+  8% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  35% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  37% {
+    opacity: 0.6;
+    filter: blur(0.8px);
+  }
+  39% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  72% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+  73% {
+    opacity: 0.76;
+    filter: blur(0.4px);
+  }
+  74% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+}
+
+.pip-iframe-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.pip-iframe-wrapper iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pip-iframe-wrapper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 8.3px,
+      rgba(0, 255, 0, 0.155) 10.5px,
+      transparent 16px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 10.5px,
+      rgba(0, 255, 0, 0.057) 12.7px,
+      transparent 16px
+    );
+  background-size:
+    100% 16px,
+    16px 100%;
+  mix-blend-mode: screen;
+  animation: crtFlicker 8s infinite;
+}
+
+.pip-iframe-wrapper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: radial-gradient(ellipse at center, transparent 49%, rgba(0, 15, 0, 0.22) 100%);
+}
+
+.pip-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+.pip-resize-handle::before,
+.pip-resize-handle::after {
+  content: "";
+  position: absolute;
+  background: #0f06;
+}
+
+.pip-resize-handle::before {
+  bottom: 4px;
+  right: 2px;
+  width: 10px;
+  height: 2px;
+}
+
+.pip-resize-handle::after {
+  bottom: 2px;
+  right: 4px;
+  width: 2px;
+  height: 10px;
+}
+
+.pip-container.minimized {
+  height: auto !important;
+}
+
+.pip-container.minimized .pip-iframe-wrapper {
+  display: none;
+}
