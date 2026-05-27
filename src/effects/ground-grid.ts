@@ -35,9 +35,9 @@ export function buildGroundGrid(scene: THREE.Scene): void {
             float line = min(grid.x, grid.y);
             float gridAlpha = 1.0 - smoothstep(0.0, 0.012, line);
 
-            // Subtle animated pulse along grid lines
-            float stream = abs(fract(vUv.x * 5.0 + uTime * 0.3) - 0.5);
-            float streamAlpha = (1.0 - smoothstep(0.0, 0.04, stream)) * 0.5;
+            // Subtle animated scan along grid lines
+            float stream = abs(fract(vUv.x * 2.0 + uTime * 0.05) - 0.5);
+            float streamAlpha = (1.0 - smoothstep(0.0, 0.02, stream)) * 0.5;
 
             float dist = distance(vUv, vec2(0.5));
             float fade = 1.0 - smoothstep(0.2, 0.5, dist);
