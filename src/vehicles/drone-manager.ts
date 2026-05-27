@@ -5,6 +5,16 @@ import { CELL } from "../constants.js";
 import type { DroneUserData } from "../types.js";
 import { createPoliceDrone } from "./police-drone.js";
 
+const DRONE_RESPAWN_TIME = 30; // seconds before a destroyed drone comes back
+
+interface DestroyedDroneRecord {
+  curve: THREE.CatmullRomCurve3;
+  speed: number;
+  dir: number;
+  blinkPhase: number;
+  destroyedAt: number; // elapsed time when destroyed
+}
+
 interface SegmentDef {
   fixedAxis: "x" | "z";
   fixedIdx: number;
@@ -106,6 +116,60 @@ export function buildPoliceDrones(scene: THREE.Scene): void {
   }
 
   window._policeDrones = drones;
+}
+
+// ── Drone destruction & respawn ───────────────────────────────────
+const destroyedDrones: DestroyedDroneRecord[] = [];
+
+/** Remove a drone from the scene and queue it for respawn. */
+export function destroyDrone(drone: THREE.Group, elapsed: number): void {
+  const ud = drone.userData as DroneUserData;
+  if (!ud.curve) return; // nothing to respawn into
+
+  destroyedDrones.push({
+    curve: ud.curve,
+    speed: ud.speed ?? 0.0001,
+    dir: ud.dir ?? 1,
+    blinkPhase: ud.blinkPhase ?? 0,
+    destroyedAt: elapsed,
+  });
+
+  // Remove from scene
+  if (drone.parent) drone.parent.remove(drone);
+
+  // Remove from the live tracking array
+  const drones = window._policeDrones;
+  if (drones) {
+    const idx = drones.indexOf(drone);
+    if (idx !== -1) drones.splice(idx, 1);
+  }
+}
+
+/** Check for expired destroyed drones and respawn them. */
+export function checkAndRespawnDrones(scene: THREE.Scene, elapsed: number): void {
+  const drones = window._policeDrones ?? [];
+
+  for (let i = destroyedDrones.length - 1; i >= 0; i--) {
+    const record = destroyedDrones[i];
+    if (elapsed - record.destroyedAt < DRONE_RESPAWN_TIME) continue;
+
+    // Respawn!
+    const drone = createPoliceDrone();
+    const ud = drone.userData as DroneUserData;
+    ud.curve = record.curve;
+    ud.t = 0;
+    ud.speed = record.speed;
+    ud.dir = record.dir;
+    ud.blinkPhase = record.blinkPhase;
+
+    const pt = record.curve.getPointAt(ud.t);
+    drone.position.copy(pt);
+
+    scene.add(drone);
+    drones.push(drone);
+
+    destroyedDrones.splice(i, 1);
+  }
 }
 
 /** Update all police drones along patrol curves (test.html L2216-L2280). */

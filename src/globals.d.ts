@@ -13,6 +13,7 @@ declare global {
     _rain?: THREE.Points;
     _hazeLayers?: THREE.Mesh[];
     _lightBeams?: THREE.Group[];
+    _buildingHeights?: Array<{ x: number; z: number; h: number }>;
   }
 }
 

@@ -38,3 +38,9 @@ export interface BlinkLightData {
   blinkSpeed: number;
   blinkPhase: number;
 }
+
+// Laser collision result
+export interface CollisionHit {
+  point: THREE.Vector3;
+  normal?: THREE.Vector3;
+}

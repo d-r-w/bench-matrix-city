@@ -1,6 +1,6 @@
 // Red laser beams — fired on click, travel directionally from camera (GLSL + JS)
 import * as THREE from "three";
-
+import { testLaserVsBuildings, testLaserVsDrones } from "../collision.js";
 import {
   fragmentShader as coreFragment,
   vertexShader as coreVertex,
@@ -9,6 +9,8 @@ import {
   fragmentShader as haloFragment,
   vertexShader as haloVertex,
 } from "../shaders/laser/halo.js";
+import { destroyDrone } from "../vehicles/drone-manager.js";
+import { spawnExplosion } from "./explosion.js";
 
 // ── Laser beam data ────────────────────────────────────────────────
 
@@ -24,6 +26,7 @@ interface LaserBeam {
   speed: number; // world units / sec
   life: number; // remaining lifetime in seconds
   maxLife: number; // total lifetime
+  hasExploded: boolean; // true if already hit something and spawned explosion
 }
 
 const LASER_SPEED = 40; // world units per second (3× slower)
@@ -133,6 +136,7 @@ export function fireLaser(camera: THREE.PerspectiveCamera, ndcX: number, ndcY: n
     speed: LASER_SPEED,
     life: LASER_MAX_LIFE,
     maxLife: LASER_MAX_LIFE,
+    hasExploded: false,
   };
 
   activeLasers.push(laser);
@@ -144,8 +148,12 @@ export function fireLaser(camera: THREE.PerspectiveCamera, ndcX: number, ndcY: n
   }
 }
 
-/** Update all active lasers: move forward, fade, remove dead ones. */
+/** Update all active lasers: move forward, check collisions, fade, remove dead ones. */
 export function updateLasers(dt: number, elapsed: number): void {
+  const buildings = window._buildingHeights ?? [];
+  const drones = window._policeDrones ?? [];
+  const scene = getScene();
+
   for (let i = activeLasers.length - 1; i >= 0; i--) {
     const laser = activeLasers[i];
     laser.life -= dt;
@@ -157,8 +165,52 @@ export function updateLasers(dt: number, elapsed: number): void {
       continue;
     }
 
-    // Move forward along direction
-    const moveDist = laser.speed * dt;
+    // ── Collision detection (only once per laser) ───────────
+    const stepDist = laser.speed * dt;
+    if (!laser.hasExploded && scene) {
+      // Test against buildings first
+      const buildingHit = testLaserVsBuildings(
+        laser.group.position,
+        laser.direction,
+        LASER_LENGTH,
+        buildings
+      );
+
+      if (buildingHit) {
+        spawnExplosion(scene, buildingHit.point, buildingHit.normal);
+        laser.hasExploded = true;
+        // Shorten the beam to hit point distance
+        const hitDist = laser.group.position.distanceTo(buildingHit.point);
+        shortenLaser(laser, Math.max(1.0, hitDist));
+      } else {
+        // Test against drones (only if no building hit)
+        const droneHit = testLaserVsDrones(
+          laser.group.position,
+          laser.direction,
+          LASER_LENGTH,
+          drones
+        );
+
+        if (droneHit) {
+          spawnExplosion(scene, droneHit.point, undefined, {
+            particleCount: 120,
+            velocityScale: 3.5,
+            burstLifetime: 4.0,
+            flashIntensity: 40,
+            flashRadius: 50,
+            scorchSize: 4.0,
+            color: new THREE.Color(0xff6600), // orange-yellow fuel fire
+          });
+          destroyDrone(droneHit.drone, elapsed);
+          laser.hasExploded = true;
+          const hitDist = laser.group.position.distanceTo(droneHit.point);
+          shortenLaser(laser, Math.max(1.0, hitDist));
+        }
+      }
+    }
+
+    // Move forward along direction (slower after hitting something)
+    const moveDist = laser.hasExploded ? stepDist * 0.2 : stepDist;
     laser.group.position.addScaledVector(laser.direction, moveDist);
 
     // Compute normalized life (0..1) for shader uniforms
@@ -184,6 +236,17 @@ export function updateLasers(dt: number, elapsed: number): void {
     if (muzzleLight) {
       const lifeRatio = Math.max(0, laser.life / laser.maxLife);
       muzzleLight.intensity = lifeRatio * 2.0;
+    }
+  }
+}
+
+/** Shorten a laser beam's geometry to the given length. */
+function shortenLaser(laser: LaserBeam, newLength: number): void {
+  // Scale children (core cylinder + halo) along Y axis
+  const scale = Math.max(0.1, newLength / LASER_LENGTH);
+  for (const child of laser.group.children) {
+    if (child instanceof THREE.Mesh || child instanceof THREE.Points) {
+      child.scale.y = scale;
     }
   }
 }

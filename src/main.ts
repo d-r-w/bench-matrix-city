@@ -11,6 +11,7 @@ import { buildCity } from "./city/city-builder.js";
 import { updateAntennas } from "./city/geometry/antenna.js";
 import { updateWindowMeshes } from "./city/geometry/window-grid.js";
 import { updateMatrixMesh } from "./city/instanced-mesh.js";
+import { updateExplosions } from "./effects/explosion.js";
 // Effects
 import { buildGroundGrid, updateGroundGrid, updateStreamSprites } from "./effects/ground-grid.js";
 import { buildHazeLayers, updateHazeLayers } from "./effects/haze-layers.js";
@@ -23,7 +24,7 @@ import {
   fragmentShader as vignetteFragment,
   vertexShader as vignetteVertex,
 } from "./shaders/vignette.js";
-import { updateDrones } from "./vehicles/drone-manager.js";
+import { checkAndRespawnDrones, updateDrones } from "./vehicles/drone-manager.js";
 // Vehicles
 import { updateVehicles } from "./vehicles/vehicle.js";
 
@@ -85,7 +86,8 @@ function init(): void {
   composer.addPass(vignettePass);
 
   // ── Build the city (includes vehicles + drones) ──────────
-  buildCity(scene);
+  const buildingHeights = buildCity(scene);
+  window._buildingHeights = buildingHeights;
 
   // ── Scene effects ────────────────────────────────────────
   buildGroundGrid(scene);
@@ -155,6 +157,9 @@ function animate(): void {
   // Police drones along patrol curves
   updateDrones(camera.position, dt, t);
 
+  // Respawn destroyed drones after timeout
+  checkAndRespawnDrones(scene, t);
+
   // Stream sprites on ground grid
   updateStreamSprites(dt, t);
 
@@ -173,6 +178,9 @@ function animate(): void {
 
   // Red laser beams
   updateLasers(dt, t);
+
+  // Explosion / impact effects
+  updateExplosions(dt, t);
 
   composer.render();
 }

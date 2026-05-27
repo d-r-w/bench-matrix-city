@@ -48,12 +48,12 @@ export function buildCity(scene: THREE.Scene): BuildingHeight[] {
       const dist = Math.sqrt(gx * gx + gz * gz);
       const maxH = calcBuildingHeight(gx, gz);
 
+      // Randomly leave blocks empty for plazas — denser near center
+      if (Math.random() > fillChance(dist)) continue;
+
       const bx = gx * CELL;
       const bz = gz * CELL;
       buildingHeights.push({ x: bx, z: bz, h: maxH });
-
-      // Randomly leave blocks empty for plazas — denser near center
-      if (Math.random() > fillChance(dist)) continue;
 
       // ── Building geometry details ─────────────────────
       buildingMeshes.push(createBuildingBox(bx, bz, maxH));
