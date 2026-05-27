@@ -14,6 +14,7 @@ import { updateMatrixMesh } from "./city/instanced-mesh.js";
 // Effects
 import { buildGroundGrid, updateGroundGrid, updateStreamSprites } from "./effects/ground-grid.js";
 import { buildHazeLayers, updateHazeLayers } from "./effects/haze-layers.js";
+import { fireLaser, updateLasers } from "./effects/laser.js";
 import { buildLightBeams, updateLightBeams } from "./effects/light-beams.js";
 import { buildRain, updateRain } from "./effects/rain.js";
 import { buildStarfield } from "./effects/starfield.js";
@@ -97,6 +98,27 @@ function init(): void {
   createSteerButton(camera);
   startDroneFlythrough(camera);
 
+  // ── Store scene reference for laser module ───────────────
+  (window as unknown as Record<string, THREE.Scene>).__matrixCityScene = scene;
+
+  // ── Click to fire red laser ──────────────────────────────
+  document.addEventListener("click", (e: MouseEvent) => {
+    // Ignore clicks on UI elements (PiP overlays, steer button)
+    const target = e.target as HTMLElement;
+    if (
+      target.closest(".pip-container") ||
+      target.id === "steer-toggle" ||
+      target.closest("#steer-toggle")
+    ) {
+      return;
+    }
+
+    // Convert click to NDC (-1..+1)
+    const ndcX = (e.clientX / innerWidth) * 2 - 1;
+    const ndcY = -(e.clientY / innerHeight) * 2 + 1;
+    fireLaser(camera, ndcX, ndcY);
+  });
+
   // ── Hide loading overlay ─────────────────────────────────
   const loading = document.getElementById("loading");
   if (loading) loading.style.display = "none";
@@ -148,6 +170,9 @@ function animate(): void {
 
   // Camera-following point light
   if (window._camLight) window._camLight.position.copy(camera.position);
+
+  // Red laser beams
+  updateLasers(dt, t);
 
   composer.render();
 }
