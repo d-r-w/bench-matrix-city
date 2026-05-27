@@ -2,9 +2,14 @@
 import * as THREE from "three";
 import { BUILDING_WIDTH } from "../../constants.js";
 
-/** Add miscellaneous roof details to a building. */
-export function addRoofDetails(bx: number, bz: number, maxH: number): THREE.Group {
+/** Add miscellaneous roof details to a building. Returns whether a water tower was placed. */
+export function addRoofDetails(
+  bx: number,
+  bz: number,
+  maxH: number
+): { group: THREE.Group; hasWaterTower: boolean } {
   const group = new THREE.Group();
+  let hasWaterTower = false;
 
   // AC unit / box on roof
   if (Math.random() > 0.4) {
@@ -29,6 +34,7 @@ export function addRoofDetails(bx: number, bz: number, maxH: number): THREE.Grou
 
   // Water tower on some taller buildings
   if (maxH > 20 && Math.random() > 0.7) {
+    hasWaterTower = true;
     const roofY = maxH * 0.32;
     const towerX = bx + (Math.random() - 0.5) * BUILDING_WIDTH * 0.3;
     const towerZ = bz + (Math.random() - 0.5) * BUILDING_WIDTH * 0.3;
@@ -60,5 +66,5 @@ export function addRoofDetails(bx: number, bz: number, maxH: number): THREE.Grou
     group.add(tank);
   }
 
-  return group;
+  return { group, hasWaterTower };
 }

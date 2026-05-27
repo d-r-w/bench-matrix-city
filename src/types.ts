@@ -3,6 +3,7 @@ export interface BuildingHeight {
   x: number;
   z: number;
   h: number;
+  hasWaterTower?: boolean; // true if roof has a water tower
 }
 
 // Vehicle userData shape (test.html L625-L630)
@@ -24,6 +25,15 @@ export interface DroneUserData {
   speed: number;
   dir: number;
   blinkPhase: number;
+  // Takeoff from rooftop state
+  isTakingOff?: boolean;
+  takeoffPhase?: "hover" | "rise";
+  takeoffStartY?: number;
+  takeoffTargetY?: number;
+  takeoffX?: number;
+  takeoffZ?: number;
+  takeoffElapsed?: number;
+  takeoffTiltX?: number;
 }
 
 // Stream sprite userData shape (test.html L1590-L1592)

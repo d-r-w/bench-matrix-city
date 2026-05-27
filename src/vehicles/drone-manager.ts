@@ -1,4 +1,4 @@
-// Police drone patrol routes + manager (test.html L1428-L1517, update L2216-L2280)
+// Police drone patrol routes + manager — drones take off from building rooftops
 import * as THREE from "three";
 
 import { CELL } from "../constants.js";
@@ -6,6 +6,14 @@ import type { DroneUserData } from "../types.js";
 import { createPoliceDrone } from "./police-drone.js";
 
 const DRONE_RESPAWN_TIME = 30; // seconds before a destroyed drone comes back
+const TAKEOFF_HOVER_DURATION = 10.8; // seconds hovering on rooftop before rising
+const TAKEOFF_RISE_DURATION = 10.5; // seconds for the slow ascent to patrol altitude
+
+export interface DroneSpawnPoint {
+  x: number;
+  y: number; // roof height + offset (ready-to-fly position)
+  z: number;
+}
 
 interface DestroyedDroneRecord {
   curve: THREE.CatmullRomCurve3;
@@ -48,8 +56,20 @@ function makePatrolPath(segments: SegmentDef[]): THREE.CatmullRomCurve3 | null {
   return new THREE.CatmullRomCurve3(pts, true);
 }
 
-/** Build police drones on patrol curves and register them globally. */
-export function buildPoliceDrones(scene: THREE.Scene): void {
+/** Pick a random spawn point from the pool. */
+function pickSpawnPoint(spawnPoints: DroneSpawnPoint[]): DroneSpawnPoint {
+  return spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
+}
+
+// ── Persistent state for respawn ────────────────────────────────
+const destroyedDrones: DestroyedDroneRecord[] = [];
+let _spawnPoints: DroneSpawnPoint[] = [];
+
+/** Build police drones on patrol curves, launching from building rooftops. */
+export function buildPoliceDrones(scene: THREE.Scene, spawnPoints: DroneSpawnPoint[]): void {
+  if (spawnPoints.length === 0) return;
+  _spawnPoints = spawnPoints;
+
   // Define 3 patrol routes — parallel to camera but on different roads
   const patrolRoutes = [
     // Route 1: outer ring (x=2, z=6, x=-2, z=-4)
@@ -86,30 +106,35 @@ export function buildPoliceDrones(scene: THREE.Scene): void {
   const validRoutes = patrolRoutes.filter((c): c is THREE.CatmullRomCurve3 => c !== null);
 
   for (let i = 0; i < NUM_DRONES; i++) {
+    if (validRoutes.length === 0) continue;
+
     const drone = createPoliceDrone();
-    if (validRoutes.length === 0) {
-      scene.remove(drone);
-      continue;
-    }
     const curve = validRoutes[i % validRoutes.length];
-
-    // Each drone starts at a different position along its route
-    const startT = i / NUM_DRONES + (i % validRoutes.length) * 0.15;
     const speed = 0.00008 + Math.random() * 0.00006;
-
-    // Alternate direction for variety
     const dir = i % 2 === 0 ? 1 : -1;
+
+    // Pick a random building rooftop as takeoff point
+    const spawn = pickSpawnPoint(spawnPoints);
 
     const ud = drone.userData as DroneUserData;
     ud.curve = curve;
-    ud.t = startT % 1;
+    ud.t = (i / NUM_DRONES + i * 0.15) % 1;
     ud.speed = speed;
     ud.dir = dir;
     ud.blinkPhase = Math.random() * Math.PI * 2;
 
-    // Set initial position
-    const pt = curve.getPointAt(ud.t);
-    drone.position.copy(pt);
+    // Takeoff state — drone starts on the rooftop, hovers menacingly, then rises slowly
+    ud.isTakingOff = true;
+    ud.takeoffPhase = "hover";
+    ud.takeoffStartY = spawn.y;
+    ud.takeoffX = spawn.x;
+    ud.takeoffZ = spawn.z;
+
+    const curvePt = curve.getPointAt(ud.t);
+    ud.takeoffTargetY = curvePt.y; // rise to the patrol altitude at this route position
+
+    // Position drone on the rooftop
+    drone.position.set(spawn.x, spawn.y, spawn.z);
 
     scene.add(drone);
     drones.push(drone);
@@ -119,12 +144,10 @@ export function buildPoliceDrones(scene: THREE.Scene): void {
 }
 
 // ── Drone destruction & respawn ───────────────────────────────────
-const destroyedDrones: DestroyedDroneRecord[] = [];
-
-/** Remove a drone from the scene and queue it for respawn. */
+/** Remove a drone from the scene and queue it for rooftop respawn. */
 export function destroyDrone(drone: THREE.Group, elapsed: number): void {
   const ud = drone.userData as DroneUserData;
-  if (!ud.curve) return; // nothing to respawn into
+  if (!ud.curve) return;
 
   destroyedDrones.push({
     curve: ud.curve,
@@ -145,15 +168,19 @@ export function destroyDrone(drone: THREE.Group, elapsed: number): void {
   }
 }
 
-/** Check for expired destroyed drones and respawn them. */
+/** Check for expired destroyed drones and respawn them from building rooftops. */
 export function checkAndRespawnDrones(scene: THREE.Scene, elapsed: number): void {
   const drones = window._policeDrones ?? [];
+
+  if (_spawnPoints.length === 0) return;
 
   for (let i = destroyedDrones.length - 1; i >= 0; i--) {
     const record = destroyedDrones[i];
     if (elapsed - record.destroyedAt < DRONE_RESPAWN_TIME) continue;
 
-    // Respawn!
+    // Pick a random building rooftop for the new drone to launch from
+    const spawn = pickSpawnPoint(_spawnPoints);
+
     const drone = createPoliceDrone();
     const ud = drone.userData as DroneUserData;
     ud.curve = record.curve;
@@ -162,8 +189,17 @@ export function checkAndRespawnDrones(scene: THREE.Scene, elapsed: number): void
     ud.dir = record.dir;
     ud.blinkPhase = record.blinkPhase;
 
-    const pt = record.curve.getPointAt(ud.t);
-    drone.position.copy(pt);
+    // Takeoff from rooftop — hover first, then slow rise
+    ud.isTakingOff = true;
+    ud.takeoffPhase = "hover";
+    ud.takeoffStartY = spawn.y;
+    ud.takeoffX = spawn.x;
+    ud.takeoffZ = spawn.z;
+
+    const curvePt = record.curve.getPointAt(ud.t);
+    ud.takeoffTargetY = curvePt.y;
+
+    drone.position.set(spawn.x, spawn.y, spawn.z);
 
     scene.add(drone);
     drones.push(drone);
@@ -182,6 +218,102 @@ export function updateDrones(cameraPos: THREE.Vector3, _dt: number, elapsed: num
     const curve = ud.curve;
     if (!curve) continue;
 
+    // ── Takeoff phase: hover on rooftop, then slow menacing rise ──
+    if (ud.isTakingOff) {
+      if (!ud.takeoffElapsed) {
+        ud.takeoffElapsed = elapsed;
+      }
+
+      const startY = ud.takeoffStartY ?? drone.position.y;
+      const targetY = ud.takeoffTargetY ?? 20;
+      const startX = ud.takeoffX ?? drone.position.x;
+      const startZ = ud.takeoffZ ?? drone.position.z;
+
+      // Phase 1: Hover on rooftop — searchlight sweeps around menacingly
+      if (ud.takeoffPhase === "hover") {
+        const hoverProgress = Math.min(1, (elapsed - ud.takeoffElapsed) / TAKEOFF_HOVER_DURATION);
+
+        // Gentle bob while hovering
+        drone.position.y = startY + Math.sin(hoverProgress * Math.PI * 2) * 0.15;
+        drone.position.x = startX;
+        drone.position.z = startZ;
+
+        // Searchlight sweep — pan left/right slowly during hover
+        const sweepAngle = Math.sin(hoverProgress * Math.PI * 1.5) * 0.8;
+        const sweepTargetX = startX + Math.sin(sweepAngle) * 20;
+        const sweepTargetZ = startZ + Math.cos(sweepAngle) * 20;
+        drone.lookAt(sweepTargetX, startY - 5, sweepTargetZ);
+
+        // Subtle tilt during hover for presence
+        if (!ud.takeoffTiltX) ud.takeoffTiltX = 0.1;
+        drone.rotation.x += Math.sin(hoverProgress * Math.PI) * ud.takeoffTiltX;
+
+        if (hoverProgress >= 1) {
+          ud.takeoffPhase = "rise";
+          ud.takeoffElapsed = elapsed; // reset timer for rise phase
+        }
+      }
+
+      // Phase 2: Slow, deliberate ascent to patrol altitude
+      else if (ud.takeoffPhase === "rise") {
+        const progress = Math.min(1, (elapsed - ud.takeoffElapsed) / TAKEOFF_RISE_DURATION);
+
+        // Ease-in-then-out: starts slow, accelerates mid-rise, settles at top
+        // Creates that "gathering momentum" feel
+        const eased =
+          progress < 0.5
+            ? 2 * progress * progress // ease-in for first half
+            : 1 - (-2 * progress + 2) ** 2 / 2; // ease-out for second half
+
+        drone.position.y = startY + (targetY - startY) * eased;
+
+        // Slowly drift toward the curve's x/z position as we rise
+        const pt = curve.getPointAt(ud.t);
+        const driftFactor = eased * 0.6; // only move partway to curve during takeoff
+        drone.position.x = startX + (pt.x - startX) * driftFactor;
+        drone.position.z = startZ + (pt.z - startZ) * driftFactor;
+
+        // Advance t slowly during rise so the curve position moves
+        ud.t = (ud.t + ud.speed * ud.dir) % 1;
+        if (ud.t < 0) ud.t += 1;
+
+        // Tilt forward as ascending — nose points up early, levels out near top
+        const tiltAngle = Math.max(0, 0.3 * (1 - progress));
+        drone.rotation.x -= tiltAngle;
+
+        // Look ahead along curve direction, blending from upward to forward
+        if (progress < 0.4) {
+          // Still looking somewhat downward/around during early rise
+          const lookAhead = 5 + progress * 15;
+          drone.lookAt(pt.x, startY - lookAhead, pt.z);
+        } else {
+          // Transition to forward-looking along patrol path
+          let lookT = (ud.t + 0.02 * ud.dir) % 1;
+          if (lookT < 0) lookT += 1;
+          const lookPt = curve.getPointAt(lookT);
+          drone.lookAt(lookPt);
+        }
+
+        // Complete takeoff when rise finishes
+        if (progress >= 1) {
+          ud.isTakingOff = false;
+          ud.takeoffPhase = undefined;
+          const finalPt = curve.getPointAt(ud.t);
+          drone.position.x = finalPt.x;
+          drone.position.z = finalPt.z;
+          drone.rotation.x = 0; // reset tilt
+        }
+      }
+
+      // Update shader uniforms even during takeoff
+      if (ud.haloMat) ud.haloMat.uniforms.uTime.value = elapsed;
+      if (ud.beamMat) ud.beamMat.uniforms.uTime.value = elapsed;
+      if (ud.discMat) ud.discMat.uniforms.uTime.value = elapsed;
+
+      continue; // skip normal patrol update
+    }
+
+    // ── Normal patrol mode ────────────────────────────────
     ud.t = (ud.t + ud.speed * ud.dir) % 1;
     if (ud.t < 0) ud.t += 1;
 

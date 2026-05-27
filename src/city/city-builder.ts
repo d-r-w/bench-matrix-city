@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import { CELL, GRID } from "../constants.js";
 import type { BuildingHeight } from "../types.js";
-import { buildPoliceDrones } from "../vehicles/drone-manager.js";
+import { buildPoliceDrones, type DroneSpawnPoint } from "../vehicles/drone-manager.js";
 import { createVehicle } from "../vehicles/vehicle.js";
 import { addAntenna } from "./geometry/antenna.js";
 
@@ -77,7 +77,9 @@ export function buildCity(scene: THREE.Scene): BuildingHeight[] {
       }
 
       // Roof details (AC units, water towers)
-      scene.add(addRoofDetails(bx, bz, maxH));
+      const roofResult = addRoofDetails(bx, bz, maxH);
+      buildingHeights[buildingHeights.length - 1].hasWaterTower = roofResult.hasWaterTower;
+      scene.add(roofResult.group);
 
       addWallChars(positions, charIndices, brightFlags, bx, bz, maxH, dist);
       addRoofChars(positions, charIndices, brightFlags, bx, bz, maxH, dist);
@@ -124,8 +126,11 @@ export function buildCity(scene: THREE.Scene): BuildingHeight[] {
   }
   window._vehicles = vehicles;
 
-  // ── Police drones on patrol curves similar to camera path ─
-  buildPoliceDrones(scene);
+  // ── Police drones take off from building rooftops (no water towers) ─
+  const droneSpawnPoints: DroneSpawnPoint[] = buildingHeights
+    .filter((b) => !b.hasWaterTower && b.h > 8)
+    .map((b) => ({ x: b.x, y: b.h * 0.32 + 1.5, z: b.z }));
+  buildPoliceDrones(scene, droneSpawnPoints);
 
   return buildingHeights;
 }
