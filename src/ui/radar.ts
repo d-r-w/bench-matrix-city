@@ -28,6 +28,9 @@ let radarCamera: THREE.OrthographicCamera | null = null;
 let radarMesh: THREE.Mesh | null = null;
 const uniforms: Record<string, THREE.Uniform> = {};
 
+// Reusable vector to avoid per-frame GC pressure
+const _camForward = new THREE.Vector3();
+
 // Track viewport aspect for correct circular scaling in ortho space
 let viewportAspect = innerWidth / innerHeight;
 
@@ -97,9 +100,8 @@ export function updateRadar(camera: THREE.PerspectiveCamera, elapsed: number): v
   uniforms.uTime.value = elapsed;
 
   // Camera heading: angle of forward vector projected onto XZ plane
-  const camForward = new THREE.Vector3();
-  camera.getWorldDirection(camForward);
-  const heading = Math.atan2(camForward.x, camForward.z);
+  camera.getWorldDirection(_camForward);
+  const heading = Math.atan2(_camForward.x, _camForward.z);
   uniforms.uRotation.value = heading;
 
   // Camera-relative position: rotate world offsets into radar screen space.
