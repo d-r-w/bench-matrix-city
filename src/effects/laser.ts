@@ -30,10 +30,10 @@ interface LaserBeam {
   collisionLife?: number; // life value at moment of collision (for fade-out)
 }
 
-const LASER_SPEED = 40; // world units per second (3× slower)
+const LASER_SPEED = 20; // world units per second
 const LASER_MAX_LIFE = 5.0; // seconds before fade-out starts
 const LASER_FADE_TIME = 1.2; // seconds to fully fade out (natural end of life)
-const LASER_COLLISION_FADE_TIME = .5; // seconds to fade after hitting something
+const LASER_COLLISION_FADE_TIME = 0.5; // seconds to fade after hitting something
 const LASER_LENGTH = 30; // visual beam length in world units (5× longer)
 const MAX_ACTIVE = 24; // max simultaneous lasers
 
@@ -200,6 +200,7 @@ export function updateLasers(dt: number, elapsed: number): void {
             flashRadius: 50,
             scorchSize: 4.0,
             color: new THREE.Color(0xff6600), // orange-yellow fuel fire
+            shakeIntensity: 1.5,
           });
           destroyDrone(droneHit.drone, elapsed);
           laser.hasExploded = true;

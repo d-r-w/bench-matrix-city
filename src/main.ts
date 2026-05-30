@@ -11,6 +11,7 @@ import { buildCity } from "./city/city-builder.js";
 import { updateAntennas } from "./city/geometry/antenna.js";
 import { updateWindowMeshes } from "./city/geometry/window-grid.js";
 import { updateMatrixMesh } from "./city/instanced-mesh.js";
+import { updateCameraShake } from "./effects/camera-shake.js";
 import { updateExplosions } from "./effects/explosion.js";
 // Effects
 import { buildGroundGrid, updateGroundGrid, updateStreamSprites } from "./effects/ground-grid.js";
@@ -181,6 +182,9 @@ function animate(): void {
 
   // Explosion / impact effects
   updateExplosions(dt, t);
+
+  // Camera shake (applied on top of flythrough position)
+  updateCameraShake(camera, dt);
 
   composer.render();
 }

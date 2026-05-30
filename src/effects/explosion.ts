@@ -1,5 +1,6 @@
 // Explosion / impact effects for laser collisions (GLSL + JS)
 import * as THREE from "three";
+import { triggerShake } from "./camera-shake.js";
 
 const MAX_EXPLOSIONS = 32;
 const PARTICLES_PER_BURST = 40;
@@ -115,6 +116,8 @@ interface ExplosionOptions {
   scorchSize?: number;
   /** Explosion color (default: red-orange) */
   color?: THREE.Color;
+  /** Camera shake intensity on spawn (undefined = no shake) */
+  shakeIntensity?: number;
 }
 
 /**
@@ -137,6 +140,12 @@ export function spawnExplosion(
   const flashRadius = options.flashRadius ?? 20;
   const scorchSize = options.scorchSize ?? 1.2;
   const color = options.color ?? new THREE.Color(0xff4422);
+  const shakeIntensity = options.shakeIntensity;
+
+  // Trigger camera shake if requested
+  if (shakeIntensity !== undefined) {
+    triggerShake(shakeIntensity);
+  }
 
   // Recycle oldest if at capacity
   if (activeExplosions.length >= MAX_EXPLOSIONS) {
