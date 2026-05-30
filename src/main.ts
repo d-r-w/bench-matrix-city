@@ -62,7 +62,7 @@ function init(): void {
   window._camLight = camLight;
 
   // ── Camera ───────────────────────────────────────────────
-  camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 400);
+  camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.1, 400);
   camera.position.set(30, 25, 30);
   camera.lookAt(0, 10, 0);
 
