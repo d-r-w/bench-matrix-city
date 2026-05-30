@@ -22,8 +22,10 @@ export function createPoliceDrone(): THREE.Group {
   const bodyGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.12, 6);
   const bodyMat = new THREE.MeshStandardMaterial({
     color: 0x1a1a2a,
+    emissive: 0x58796e,
+    emissiveIntensity: 0.8,
     roughness: 0.4,
-    metalness: 0.8,
+    metalness: 1,
   });
   group.add(new THREE.Mesh(bodyGeo, bodyMat));
 
@@ -66,6 +68,7 @@ export function createPoliceDrone(): THREE.Group {
   });
   const beam = new THREE.Mesh(beamGeo, beamMat);
   beam.position.y = -5;
+  beam.visible = false; // hidden until drone takes off
   group.add(beam);
 
   // Ground-level scan disc — where the spotlight hits the ground
@@ -85,11 +88,13 @@ export function createPoliceDrone(): THREE.Group {
   const disc = new THREE.Mesh(discGeo, discMat);
   disc.rotation.x = -Math.PI / 2;
   disc.position.y = -10;
+  disc.visible = false; // hidden until drone takes off
   group.add(disc);
 
-  // Green point light for local illumination
+  // Green point light for local illumination (off until drone takes off)
   const spotLight = new THREE.PointLight(0x00ff44, 0.5, 15);
   spotLight.position.y = -3;
+  spotLight.visible = false;
   group.add(spotLight);
 
   // Store references for animation

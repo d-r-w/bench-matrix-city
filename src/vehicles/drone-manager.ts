@@ -229,7 +229,7 @@ export function updateDrones(cameraPos: THREE.Vector3, _dt: number, elapsed: num
       const startX = ud.takeoffX ?? drone.position.x;
       const startZ = ud.takeoffZ ?? drone.position.z;
 
-      // Phase 1: Hover on rooftop — searchlight sweeps around menacingly
+      // Phase 1: Hover on rooftop — gentle bob only
       if (ud.takeoffPhase === "hover") {
         const hoverProgress = Math.min(1, (elapsed - ud.takeoffElapsed) / TAKEOFF_HOVER_DURATION);
 
@@ -237,16 +237,6 @@ export function updateDrones(cameraPos: THREE.Vector3, _dt: number, elapsed: num
         drone.position.y = startY + Math.sin(hoverProgress * Math.PI * 2) * 0.15;
         drone.position.x = startX;
         drone.position.z = startZ;
-
-        // Searchlight sweep — pan left/right slowly during hover
-        const sweepAngle = Math.sin(hoverProgress * Math.PI * 1.5) * 0.8;
-        const sweepTargetX = startX + Math.sin(sweepAngle) * 20;
-        const sweepTargetZ = startZ + Math.cos(sweepAngle) * 20;
-        drone.lookAt(sweepTargetX, startY - 5, sweepTargetZ);
-
-        // Subtle tilt during hover for presence
-        if (!ud.takeoffTiltX) ud.takeoffTiltX = 0.1;
-        drone.rotation.x += Math.sin(hoverProgress * Math.PI) * ud.takeoffTiltX;
 
         if (hoverProgress >= 1) {
           ud.takeoffPhase = "rise";
@@ -277,23 +267,6 @@ export function updateDrones(cameraPos: THREE.Vector3, _dt: number, elapsed: num
         ud.t = (ud.t + ud.speed * ud.dir) % 1;
         if (ud.t < 0) ud.t += 1;
 
-        // Tilt forward as ascending — nose points up early, levels out near top
-        const tiltAngle = Math.max(0, 0.3 * (1 - progress));
-        drone.rotation.x -= tiltAngle;
-
-        // Look ahead along curve direction, blending from upward to forward
-        if (progress < 0.4) {
-          // Still looking somewhat downward/around during early rise
-          const lookAhead = 5 + progress * 15;
-          drone.lookAt(pt.x, startY - lookAhead, pt.z);
-        } else {
-          // Transition to forward-looking along patrol path
-          let lookT = (ud.t + 0.02 * ud.dir) % 1;
-          if (lookT < 0) lookT += 1;
-          const lookPt = curve.getPointAt(lookT);
-          drone.lookAt(lookPt);
-        }
-
         // Complete takeoff when rise finishes
         if (progress >= 1) {
           ud.isTakingOff = false;
@@ -302,6 +275,23 @@ export function updateDrones(cameraPos: THREE.Vector3, _dt: number, elapsed: num
           drone.position.x = finalPt.x;
           drone.position.z = finalPt.z;
           drone.rotation.x = 0; // reset tilt
+
+          // Activate searchlight now that the drone is airborne
+          if (ud.beamMat) {
+            const beamMesh = drone.children.find(
+              (c): c is THREE.Mesh => c instanceof THREE.Mesh && c.material === ud.beamMat
+            );
+            if (beamMesh) beamMesh.visible = true;
+          }
+          if (ud.discMat) {
+            const discMesh = drone.children.find(
+              (c): c is THREE.Mesh => c instanceof THREE.Mesh && c.material === ud.discMat
+            );
+            if (discMesh) discMesh.visible = true;
+          }
+          if (ud.spotLight) {
+            ud.spotLight.visible = true;
+          }
         }
       }
 

@@ -33,7 +33,6 @@ export interface DroneUserData {
   takeoffX?: number;
   takeoffZ?: number;
   takeoffElapsed?: number;
-  takeoffTiltX?: number;
 }
 
 // Stream sprite userData shape (test.html L1590-L1592)
