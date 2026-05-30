@@ -14,6 +14,7 @@ declare global {
     _hazeLayers?: THREE.Mesh[];
     _lightBeams?: THREE.Group[];
     _buildingHeights?: Array<{ x: number; z: number; h: number }>;
+    _radar?: THREE.Mesh;
   }
 }
 

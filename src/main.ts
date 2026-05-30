@@ -25,6 +25,14 @@ import {
   fragmentShader as vignetteFragment,
   vertexShader as vignetteVertex,
 } from "./shaders/vignette.js";
+// UI
+import {
+  buildRadar,
+  getRadarOverlay,
+  isInsideRadar,
+  updateRadar,
+  updateRadarViewport,
+} from "./ui/radar.js";
 import { checkAndRespawnDrones, updateDrones } from "./vehicles/drone-manager.js";
 // Vehicles
 import { updateVehicles } from "./vehicles/vehicle.js";
@@ -90,6 +98,9 @@ function init(): void {
   const buildingHeights = buildCity(scene);
   window._buildingHeights = buildingHeights;
 
+  // ── Radar minimap overlay ────────────────────────────────
+  buildRadar(scene);
+
   // ── Scene effects ────────────────────────────────────────
   buildGroundGrid(scene);
   buildRain(scene);
@@ -119,6 +130,11 @@ function init(): void {
     // Convert click to NDC (-1..+1)
     const ndcX = (e.clientX / innerWidth) * 2 - 1;
     const ndcY = -(e.clientY / innerHeight) * 2 + 1;
+
+    // Ignore clicks inside the radar minimap circle
+    if (isInsideRadar(e.clientX, e.clientY)) {
+      return;
+    }
     fireLaser(camera, ndcX, ndcY);
   });
 
@@ -183,10 +199,21 @@ function animate(): void {
   // Explosion / impact effects
   updateExplosions(dt, t);
 
+  // Radar minimap billboard + uniforms
+  updateRadar(camera, t);
+
   // Camera shake (applied on top of flythrough position)
   updateCameraShake(camera, dt);
 
   composer.render();
+
+  // Render radar overlay on top of post-processing (orthographic, fixed screen-space)
+  const overlay = getRadarOverlay?.();
+  if (overlay) {
+    renderer.autoClear = false;
+    renderer.render(overlay.scene, overlay.camera);
+    renderer.autoClear = true;
+  }
 }
 
 function onResize(): void {
@@ -194,6 +221,9 @@ function onResize(): void {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
+
+  // Keep radar overlay camera aspect in sync
+  updateRadarViewport();
 }
 
 // ── Bootstrap ────────────────────────────────────────────────

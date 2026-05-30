@@ -3,6 +3,7 @@ import * as THREE from "three";
 
 import { CELL } from "../constants.js";
 import type { DroneUserData } from "../types.js";
+import { recordDyingDrone } from "../ui/radar.js";
 import { createPoliceDrone } from "./police-drone.js";
 
 const DRONE_RESPAWN_TIME = 30; // seconds before a destroyed drone comes back
@@ -156,6 +157,9 @@ export function destroyDrone(drone: THREE.Group, elapsed: number): void {
     blinkPhase: ud.blinkPhase ?? 0,
     destroyedAt: elapsed,
   });
+
+  // Record position for radar dying-display (~1s red X)
+  recordDyingDrone(drone.position.x, drone.position.z, elapsed);
 
   // Remove from scene
   if (drone.parent) drone.parent.remove(drone);
