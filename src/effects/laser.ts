@@ -30,11 +30,11 @@ interface LaserBeam {
   collisionLife?: number; // life value at moment of collision (for fade-out)
 }
 
-const LASER_SPEED = 20; // world units per second
+const LASER_SPEED = 10; // world units per second
 const LASER_MAX_LIFE = 5.0; // seconds before fade-out starts
 const LASER_FADE_TIME = 1.2; // seconds to fully fade out (natural end of life)
 const LASER_COLLISION_FADE_TIME = 0.5; // seconds to fade after hitting something
-const LASER_LENGTH = 30; // visual beam length in world units (5× longer)
+const LASER_LENGTH = 15; // visual beam length in world units
 const MAX_ACTIVE = 24; // max simultaneous lasers
 
 const activeLasers: LaserBeam[] = [];
