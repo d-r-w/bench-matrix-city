@@ -27,11 +27,13 @@ interface LaserBeam {
   life: number; // remaining lifetime in seconds
   maxLife: number; // total lifetime
   hasExploded: boolean; // true if already hit something and spawned explosion
+  collisionLife?: number; // life value at moment of collision (for fade-out)
 }
 
 const LASER_SPEED = 40; // world units per second (3× slower)
 const LASER_MAX_LIFE = 5.0; // seconds before fade-out starts
-const LASER_FADE_TIME = 1.2; // seconds to fully fade out
+const LASER_FADE_TIME = 1.2; // seconds to fully fade out (natural end of life)
+const LASER_COLLISION_FADE_TIME = .5; // seconds to fade after hitting something
 const LASER_LENGTH = 30; // visual beam length in world units (5× longer)
 const MAX_ACTIVE = 24; // max simultaneous lasers
 
@@ -179,9 +181,7 @@ export function updateLasers(dt: number, elapsed: number): void {
       if (buildingHit) {
         spawnExplosion(scene, buildingHit.point, buildingHit.normal);
         laser.hasExploded = true;
-        // Shorten the beam to hit point distance
-        const hitDist = laser.group.position.distanceTo(buildingHit.point);
-        shortenLaser(laser, Math.max(1.0, hitDist));
+        laser.collisionLife = laser.life;
       } else {
         // Test against drones (only if no building hit)
         const droneHit = testLaserVsDrones(
@@ -203,20 +203,33 @@ export function updateLasers(dt: number, elapsed: number): void {
           });
           destroyDrone(droneHit.drone, elapsed);
           laser.hasExploded = true;
-          const hitDist = laser.group.position.distanceTo(droneHit.point);
-          shortenLaser(laser, Math.max(1.0, hitDist));
+          laser.collisionLife = laser.life;
         }
       }
     }
 
-    // Move forward along direction (slower after hitting something)
-    const moveDist = laser.hasExploded ? stepDist * 0.2 : stepDist;
+    // Stop moving after collision
+    const moveDist = laser.hasExploded ? 0 : stepDist;
     laser.group.position.addScaledVector(laser.direction, moveDist);
 
     // Compute normalized life (0..1) for shader uniforms
-    // Fade out during last LASER_FADE_TIME seconds
-    const fadeStart = laser.maxLife - LASER_FADE_TIME;
-    const alpha = laser.life > fadeStart ? 1.0 : Math.max(0, laser.life / LASER_FADE_TIME);
+    // After collision: fade from 1→0 over LASER_COLLISION_FADE_TIME
+    // Natural end of life: fade during last LASER_FADE_TIME seconds
+    let alpha: number;
+    if (laser.hasExploded && laser.collisionLife !== undefined) {
+      const timeSinceCollision = laser.collisionLife - laser.life;
+      alpha = Math.max(0, 1.0 - timeSinceCollision / LASER_COLLISION_FADE_TIME);
+    } else {
+      const fadeStart = laser.maxLife - LASER_FADE_TIME;
+      alpha = laser.life > fadeStart ? 1.0 : Math.max(0, laser.life / LASER_FADE_TIME);
+    }
+
+    // Remove dead lasers (fade finished)
+    if (alpha <= 0) {
+      if (laser.group.parent) laser.group.parent.remove(laser.group);
+      activeLasers.splice(i, 1);
+      continue;
+    }
 
     // Update core material uniforms
     const coreMat = (laser.group.userData as LaserBeamRefs).coreMat;
@@ -231,22 +244,17 @@ export function updateLasers(dt: number, elapsed: number): void {
       haloMat.uniforms.uLife.value = alpha * 0.7;
     }
 
-    // Muzzle light fades quickly
+    // Muzzle light fades quickly after collision or with natural life
     const muzzleLight = (laser.group.userData as LaserBeamRefs).muzzleLight;
     if (muzzleLight) {
-      const lifeRatio = Math.max(0, laser.life / laser.maxLife);
-      muzzleLight.intensity = lifeRatio * 2.0;
-    }
-  }
-}
-
-/** Shorten a laser beam's geometry to the given length. */
-function shortenLaser(laser: LaserBeam, newLength: number): void {
-  // Scale children (core cylinder + halo) along Y axis
-  const scale = Math.max(0.1, newLength / LASER_LENGTH);
-  for (const child of laser.group.children) {
-    if (child instanceof THREE.Mesh || child instanceof THREE.Points) {
-      child.scale.y = scale;
+      let intensity: number;
+      if (laser.hasExploded && laser.collisionLife !== undefined) {
+        const timeSinceCollision = laser.collisionLife - laser.life;
+        intensity = Math.max(0, 1.0 - timeSinceCollision / LASER_COLLISION_FADE_TIME) * 2.0;
+      } else {
+        intensity = (laser.life / laser.maxLife) * 2.0;
+      }
+      muzzleLight.intensity = intensity;
     }
   }
 }

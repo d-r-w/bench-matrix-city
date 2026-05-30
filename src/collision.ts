@@ -14,7 +14,7 @@ const _normal = new THREE.Vector3();
 export function testLaserVsBuildings(
   origin: THREE.Vector3,
   direction: THREE.Vector3,
-  _maxDist: number,
+  maxDist: number,
   buildings: BuildingHeight[]
 ): { point: THREE.Vector3; normal: THREE.Vector3 } | null {
   _ray.set(origin, direction);
@@ -34,7 +34,7 @@ export function testLaserVsBuildings(
 
     const t = rayVsAABB(_ray, boxMinX, boxMaxX, 0, boxMaxY, boxMinZ, boxMaxZ);
 
-    if (t !== null && t > 0.1 && t < closestT) {
+    if (t !== null && t > 0.1 && t < maxDist && t < closestT) {
       closestT = t;
       hitPoint = _hitPoint.copy(origin).addScaledVector(direction, t);
       // Compute approximate face normal from which side was hit
