@@ -3,8 +3,8 @@ import * as THREE from "three";
 import { fragmentShader, vertexShader } from "../shaders/radar.js";
 import type { DroneUserData } from "../types.js";
 
-const RADAR_NDC_Y = -0.56; // center Y in NDC (-1..+1), also controls left margin
-const RADAR_RADIUS = 0.42;
+const RADAR_NDC_Y = -0.56; // original center Y in NDC (-1..+1)
+const RADAR_RADIUS = 0.252;
 const WORLD_RADIUS = 90; // how many world units the radar covers (half-width)
 
 // ── Dying drone tracking ────────────────────────────────────────
@@ -93,7 +93,9 @@ export function updateRadar(camera: THREE.PerspectiveCamera, elapsed: number): v
   // Equal margin from left and bottom edges (in screen pixels):
   //   cx + halfW = cy + 1  →  cx = cy + 1 - halfW
   const ndcWidth = RADAR_RADIUS * 2;
-  radarMesh.position.set(RADAR_NDC_Y + 1 - halfW, RADAR_NDC_Y, 0);
+  // Anchor bottom-left corner at original position (radius 0.42), shift center by delta
+  const anchorOffset = -0.42 + RADAR_RADIUS;
+  radarMesh.position.set(RADAR_NDC_Y + 1 - halfW + anchorOffset, RADAR_NDC_Y + anchorOffset, 0);
   radarMesh.scale.setScalar(ndcWidth);
 
   // ── Update uniforms ────────────────────────────────────────
@@ -178,8 +180,12 @@ export function updateRadarViewport(): void {
 
 /** Check if a mouse click (in CSS pixels from top-left) falls inside the radar circle. */
 export function isInsideRadar(clientX: number, clientY: number): boolean {
-  // Radar center in screen pixels — equal margin from left and bottom edges
-  const marginPx = ((RADAR_NDC_Y + 1) * innerHeight) / 2;
-  const radiusPx = (RADAR_RADIUS * innerHeight) / 2;
-  return Math.hypot(clientX - marginPx, innerHeight - clientY - marginPx) < radiusPx;
+  const h = innerHeight;
+  // Bottom-left corner anchored at original position (radius 0.42)
+  const marginPx = ((RADAR_NDC_Y + 1) * h) / 2 - (0.42 * h) / 2;
+  const radiusPx = (RADAR_RADIUS * h) / 2;
+  // Center is offset from corner by the current radius
+  const centerX = marginPx + radiusPx;
+  const centerY = h - marginPx - radiusPx;
+  return Math.hypot(clientX - centerX, clientY - centerY) < radiusPx;
 }
