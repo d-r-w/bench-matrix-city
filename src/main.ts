@@ -5,7 +5,11 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 // Camera
-import { createSteerButton, startDroneFlythrough } from "./camera/flythrough.js";
+import {
+  createDefenseButton,
+  createSteerButton,
+  startDroneFlythrough,
+} from "./camera/flythrough.js";
 // City
 import { buildCity } from "./city/city-builder.js";
 import { updateAntennas } from "./city/geometry/antenna.js";
@@ -108,9 +112,11 @@ function init(): void {
   buildStarfield(scene);
   buildLightBeams(scene);
 
-  // ── Camera flythrough + steer button ─────────────────────
+  // ── Camera flythrough + steer/defense buttons ────────────
   createSteerButton(camera);
-  startDroneFlythrough(camera);
+  createDefenseButton();
+
+  startDroneFlythrough(camera, buildingHeights);
 
   // ── Store scene reference for laser module ───────────────
   (window as unknown as Record<string, THREE.Scene>).__matrixCityScene = scene;
@@ -122,7 +128,9 @@ function init(): void {
     if (
       target.closest(".pip-container") ||
       target.id === "steer-toggle" ||
-      target.closest("#steer-toggle")
+      target.closest("#steer-toggle") ||
+      target.id === "defense-toggle" ||
+      target.closest("#defense-toggle")
     ) {
       return;
     }

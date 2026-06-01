@@ -1,22 +1,29 @@
-// Camera drone flythrough + manual steering (test.html L1955-L2096, steer button L328-L340)
+// Camera drone flythrough + manual steering + defense patrol mode
 import * as THREE from "three";
-
 import { CELL, GRID } from "../constants.js";
+import type { BuildingHeight } from "../types.js";
 
-// ── Steering state (encapsulated, replaces globals) ────────────────
+// ── Steering modes ────────────────────────────────────────────
 
-let manualSteering = false;
+export type SteeringMode = "normal" | "free" | "defense";
+
+let currentMode: SteeringMode = "normal";
 const mouseNDC = { x: 0, y: 0 };
 const freePos = new THREE.Vector3();
 let freeYaw = 0;
 let freePitch = 0;
 const freeSpeed = 1; // world units / sec
 
-export function isManualSteering(): boolean {
-  return manualSteering;
+// Defense mode state (set once when entering)
+let defenseCurve: THREE.CatmullRomCurve3 | null = null;
+let defenseT = 0;
+const defenseSpeed = 0.00025; // curve param speed
+
+export function getCurrentMode(): SteeringMode {
+  return currentMode;
 }
 
-// ── Steer button DOM wiring (test.html L328-L340) ────────────────
+// ── Steer button DOM wiring ───────────────────────────────────
 
 let mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
 
@@ -27,21 +34,17 @@ export function createSteerButton(camera: THREE.PerspectiveCamera): HTMLButtonEl
   document.body.appendChild(btn);
 
   btn.addEventListener("click", () => {
-    manualSteering = !manualSteering;
-    btn.classList.toggle("active", manualSteering);
-    btn.textContent = manualSteering ? "[ FREE ]" : "[ STEER ]";
+    if (currentMode === "defense") return; // ignore while in defense mode
 
-    if (manualSteering) {
-      // Capture current camera position into freePos
+    if (currentMode === "normal") {
+      currentMode = "free";
       freePos.copy(camera.position);
 
-      // Derive initial yaw/pitch from camera's world direction
       const dir = new THREE.Vector3();
       camera.getWorldDirection(dir);
       freeYaw = Math.atan2(-dir.x, -dir.z);
       freePitch = Math.asin(dir.y);
 
-      // Wire up mousemove listener for NDC tracking
       if (!mouseMoveHandler) {
         mouseMoveHandler = (e: MouseEvent) => {
           mouseNDC.x = (e.clientX / innerWidth) * 2 - 1;
@@ -50,22 +53,64 @@ export function createSteerButton(camera: THREE.PerspectiveCamera): HTMLButtonEl
         document.addEventListener("mousemove", mouseMoveHandler);
       }
     } else {
-      // Reset NDC when returning to curve flythrough
+      currentMode = "normal";
       mouseNDC.x = 0;
       mouseNDC.y = 0;
     }
+
+    btn.classList.toggle("active", currentMode === "free");
+    btn.textContent = currentMode === "free" ? "[ FREE ]" : "[ STEER ]";
   });
 
   return btn;
 }
 
-// ── Drone flythrough (test.html L1955-L2096) ──────────────────────
+// ── Defense button DOM wiring ─────────────────────────────────
+
+export function createDefenseButton(): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.id = "defense-toggle";
+  btn.textContent = "[ DEFENSE ]";
+  document.body.appendChild(btn);
+
+  btn.addEventListener("click", () => {
+    if (currentMode === "defense") {
+      currentMode = "normal";
+      mouseNDC.x = 0;
+      mouseNDC.y = 0;
+    } else {
+      // Capture yaw/pitch from camera for smooth transition
+      const dir = new THREE.Vector3();
+      // We need the camera — use a stored reference or pass it differently.
+      // Handled via setDefenseYawPitch below called from main.ts
+      currentMode = "defense";
+
+      if (!mouseMoveHandler) {
+        mouseMoveHandler = (e: MouseEvent) => {
+          mouseNDC.x = (e.clientX / innerWidth) * 2 - 1;
+          mouseNDC.y = -(e.clientY / innerHeight) * 2 + 1;
+        };
+        document.addEventListener("mousemove", mouseMoveHandler);
+      }
+    }
+
+    btn.classList.toggle("active", currentMode === "defense");
+  });
+
+  return btn;
+}
+
+
+// ── Drone flythrough (normal + free + defense) ────────────────
 
 /** Start the camera drone flythrough loop. */
-export function startDroneFlythrough(camera: THREE.PerspectiveCamera): void {
+export function startDroneFlythrough(
+  camera: THREE.PerspectiveCamera,
+  buildingHeights: BuildingHeight[]
+): void {
+  // ── Normal-mode waypoints ──────────────────────────────
   const waypoints: THREE.Vector3[] = [];
 
-  // Road centers are at even grid positions * CELL.
   const roadCenter = (idx: number) => idx * CELL;
 
   let segIdx = 0;
@@ -87,68 +132,84 @@ export function startDroneFlythrough(camera: THREE.PerspectiveCamera): void {
     }
   }
 
-  // ── Path: outer rectangle with inner detour through center ──
-
-  // 1. North along x=0 road (z: -6 → 4)
+  // Path: outer rectangle with inner detour through center
   addSegment("x", 0, -6, 4, 2);
-  // 2. East along z=4 road (x: 0 → 6)
   addSegment("z", 4, 0, 6, 2);
-  // 3. South along x=6 road (z: 4 → -6)
   addSegment("x", 6, 4, -6, -2);
-  // 4. West along z=-6 road (x: 6 → -4)
   addSegment("z", -6, 6, -4, -2);
-  // 5. North along x=-4 road (z: -6 → 0) — inner loop
   addSegment("x", -4, -6, 0, 2);
-  // 6. East along z=0 road (x: -4 → 0) — through city center
   addSegment("z", 0, -4, 0, 2);
-  // 7. South along x=0 road (z: 0 → -6) — back to start
   addSegment("x", 0, 0, -6, -2);
 
-  const curve = new THREE.CatmullRomCurve3(waypoints, true);
-  let t = 0;
+  const normalCurve = new THREE.CatmullRomCurve3(waypoints, true);
+  let normalT = 0;
   const baseSpeed = 0.00015;
 
-  // Smoothed state — everything trails its ideal value for fluid motion
+  // ── Defense-mode patrol path (around city perimeter) ───
+  if (buildingHeights.length > 0) {
+    let minX = Infinity,
+      minZ = Infinity,
+      maxX = -Infinity,
+      maxZ = -Infinity,
+      maxHeight = 0;
+
+    for (const b of buildingHeights) {
+      if (b.x < minX) minX = b.x;
+      if (b.z < minZ) minZ = b.z;
+      if (b.x > maxX) maxX = b.x;
+      if (b.z > maxZ) maxZ = b.z;
+      // h is the raw grid value; actual rendered height is h * 0.32
+      const renderedH = b.h * 0.32;
+      if (renderedH > maxHeight) maxHeight = renderedH;
+    }
+
+    const margin = CELL * 0.75; // tight buffer outside building cluster
+    const patrolX0 = minX - margin;
+    const patrolZ0 = minZ - margin;
+    const patrolX1 = maxX + margin;
+    const patrolZ1 = maxZ + margin;
+    const patrolY = maxHeight * 1.5;
+
+    const dPts: THREE.Vector3[] = [
+      new THREE.Vector3(patrolX0, patrolY, patrolZ0), // SW
+      new THREE.Vector3(patrolX1, patrolY, patrolZ0), // SE
+      new THREE.Vector3(patrolX1, patrolY, patrolZ1), // NE
+      new THREE.Vector3(patrolX0, patrolY, patrolZ1), // NW
+    ];
+    defenseCurve = new THREE.CatmullRomCurve3(dPts, true);
+  }
+
+  // ── Shared smoothed state ───────────────────────────────
   const _posTarget = new THREE.Vector3();
   const _lookTarget = new THREE.Vector3();
   let smoothBank = 0;
 
-  // Grid bounds for bounce detection
   const halfGrid = (GRID / 2) * CELL;
-
-  // Reusable vectors to avoid GC pressure in the fly loop
   const _forward = new THREE.Vector3();
-  const _right = new THREE.Vector3();
 
   let lastFlyTime = performance.now();
 
   function fly(): void {
     const now = performance.now();
-    const dtSec = Math.min((now - lastFlyTime) / 1000, 0.1); // cap at 100ms
+    const dtSec = Math.min((now - lastFlyTime) / 1000, 0.1);
     lastFlyTime = now;
 
-    t = (t + baseSpeed) % 1;
-
-    if (manualSteering) {
+    if (currentMode === "free") {
       // ── Free flight: move forward in facing direction ──
-
-      const steerRate = 1.8; // radians/sec sensitivity
+      const steerRate = 1.8;
       freeYaw += -mouseNDC.x * steerRate * dtSec;
       freePitch += mouseNDC.y * steerRate * 0.6 * dtSec;
-      // Clamp pitch to avoid flipping
       freePitch = Math.max(-1.2, Math.min(1.2, freePitch));
 
-      // Compute forward direction from yaw + pitch
       _forward.set(
         -Math.sin(freeYaw) * Math.cos(freePitch),
         Math.sin(freePitch),
         -Math.cos(freeYaw) * Math.cos(freePitch)
       );
 
-      // Move forward
       freePos.addScaledVector(_forward, freeSpeed * dtSec);
 
-      // ── World bound bounce (invert direction on axis) ──
+      // World bound bounce
       if (freePos.x > halfGrid) {
         freePos.x = halfGrid;
         freeYaw += Math.PI;
@@ -164,27 +225,50 @@ export function startDroneFlythrough(camera: THREE.PerspectiveCamera): void {
         freeYaw += Math.PI;
       }
 
-      // Apply position & orientation
       camera.position.copy(freePos);
-
-      // Look target = current pos + forward direction (with slight distance)
       _lookTarget.copy(freePos).addScaledVector(_forward, 10);
       camera.lookAt(_lookTarget);
 
-      // Banking from yaw rate (turn feel)
       const yawDelta = -mouseNDC.x * steerRate;
       smoothBank += (yawDelta * 0.15 - smoothBank) * 0.1;
       camera.rotateZ(smoothBank);
+    } else if (currentMode === "defense" && defenseCurve) {
+      // ── Defense mode: drone follows patrol path, camera orbits city center ──
+
+      defenseT = (defenseT + defenseSpeed) % 1;
+      const curvePoint = defenseCurve.getPointAt(defenseT);
+
+      // Drone position lerps toward patrol path point
+      _posTarget.copy(curvePoint);
+      camera.position.lerp(_posTarget, 0.08);
+
+      // Camera always looks down at the city center (origin)
+      const lookDown = new THREE.Vector3(0, 5, 0);
+      camera.lookAt(lookDown);
+
+      // Subtle banking from path curvature
+      const p1 = defenseCurve.getPointAt(defenseT);
+      const p2 = defenseCurve.getPointAt((defenseT + 0.01) % 1);
+      const p3 = defenseCurve.getPointAt((defenseT + 0.02) % 1);
+      const v1 = new THREE.Vector3().subVectors(p2, p1).normalize();
+      const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
+      const cross = new THREE.Vector3().crossVectors(v1, v2);
+
+      let rawBank = cross.y * 0.3;
+      rawBank = Math.max(-0.2, Math.min(0.2, rawBank));
+      smoothBank += (rawBank - smoothBank) * 0.08;
+      camera.rotateZ(smoothBank);
     } else {
       // ── Normal curve flythrough ──
-      const curvePoint = curve.getPointAt(t);
+      normalT = (normalT + baseSpeed) % 1;
+
+      const curvePoint = normalCurve.getPointAt(normalT);
       _posTarget.copy(curvePoint);
       camera.position.lerp(_posTarget, 0.1);
 
       // Look-ahead along curve
-      const lookT = (t + 0.04) % 1;
-      _lookTarget.lerp(curve.getPointAt(lookT), 0.08);
-      // Tilt down only when flying above mid-range (height > 20)
+      const lookT = (normalT + 0.04) % 1;
+      _lookTarget.lerp(normalCurve.getPointAt(lookT), 0.08);
       const midH = 20;
       if (camera.position.y > midH) {
         const excess = camera.position.y - midH;
@@ -195,9 +279,10 @@ export function startDroneFlythrough(camera: THREE.PerspectiveCamera): void {
       camera.lookAt(_lookTarget);
 
       // Banking from curve curvature
-      const p1 = curve.getPointAt(t);
-      const p2 = curve.getPointAt((t + 0.01) % 1);
-      const p3 = curve.getPointAt((t + 0.02) % 1);
+      const p1 = normalCurve.getPointAt(normalT);
+      const p2 = normalCurve.getPointAt((normalT + 0.01) % 1);
+      const p3 = normalCurve.getPointAt((normalT + 0.02) % 1);
+
       const v1 = new THREE.Vector3().subVectors(p2, p1).normalize();
       const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
       const cross = new THREE.Vector3().crossVectors(v1, v2);

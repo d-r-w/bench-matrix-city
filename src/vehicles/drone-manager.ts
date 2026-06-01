@@ -40,7 +40,8 @@ function makePatrolPath(segments: SegmentDef[]): THREE.CatmullRomCurve3 | null {
 
   for (const { fixedAxis, fixedIdx, varyStart, varyEnd, step } of segments) {
     for (let v = varyStart; step > 0 ? v <= varyEnd : v >= varyEnd; v += step) {
-      const h = 12 + ((Math.sin(segIdx * 0.4) + 1) / 2) * 25;
+      // Patrol altitude scaled to match rendered building heights (raw h * 0.32)
+      const h = 8 + ((Math.sin(segIdx * 0.4) + 1) / 2) * 10;
       segIdx++;
       const pt =
         fixedAxis === "x"

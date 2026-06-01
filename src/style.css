@@ -89,6 +89,37 @@ canvas {
   box-shadow: 0 0 12px rgba(0, 255, 65, 0.2);
 }
 
+#defense-toggle {
+  position: fixed;
+  top: 16px;
+  left: 140px;
+  z-index: 300;
+  background: rgba(0, 8, 2, 0.7);
+  border: 1px solid #f004;
+  color: #a00;
+  font-family: monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+  transition: all 0.2s;
+}
+
+#defense-toggle:hover {
+  background: rgba(255, 30, 30, 0.1);
+  border-color: #f008;
+  color: #f44;
+}
+
+#defense-toggle.active {
+  background: rgba(255, 30, 30, 0.15);
+  border-color: #f00a;
+  color: #f44;
+  box-shadow: 0 0 12px rgba(255, 30, 30, 0.2);
+}
+
 /* ── PiP Overlay Styles ── */
 
 .pip-container {
