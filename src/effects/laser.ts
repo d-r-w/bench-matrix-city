@@ -10,6 +10,7 @@ import {
   vertexShader as haloVertex,
 } from "../shaders/laser/halo.js";
 import { destroyDrone } from "../vehicles/drone-manager.js";
+import { registerDeadSpot } from "./dead-spots.js";
 import { spawnExplosion } from "./explosion.js";
 
 // ── Laser beam data ────────────────────────────────────────────────
@@ -180,6 +181,7 @@ export function updateLasers(dt: number, elapsed: number): void {
 
       if (buildingHit) {
         spawnExplosion(scene, buildingHit.point, buildingHit.normal);
+        registerDeadSpot(buildingHit.point);
         laser.hasExploded = true;
         laser.collisionLife = laser.life;
       } else {

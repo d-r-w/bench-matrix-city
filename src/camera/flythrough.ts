@@ -100,7 +100,6 @@ export function createDefenseButton(): HTMLButtonElement {
   return btn;
 }
 
-
 // ── Drone flythrough (normal + free + defense) ────────────────
 
 /** Start the camera drone flythrough loop. */
