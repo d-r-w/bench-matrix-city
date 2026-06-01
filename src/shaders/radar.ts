@@ -100,11 +100,28 @@ export const fragmentShader = /* glsl */ `
       bg += vec3(0.0, 0.55, 0.12) * bx * by;
     }
 
-    // ── Active drones (colored dots with glow) ──
+    // ── Active drones (blip when sweep passes, then fade — real radar style) ──
     for (int i = 0; i < MAX_DRONES; i++) {
       if (i >= uDroneCount) break;
       vec2 dPos = uDroneData[i].xy;
       float state = uDroneData[i].z;
+
+      // Drone angle in radar display coords (same space as sweepAngle)
+      // GLSL ES 1.0 lacks atan2 — use atan(y/x) with quadrant fix
+      float PI = 3.14159265;
+      float droneAngle = dPos.x != 0.0 ? atan(dPos.y / dPos.x) : (dPos.y > 0.0 ? PI * 0.5 : -PI * 0.5);
+      if (dPos.x < 0.0) droneAngle += PI;
+      // Signed angle: how far the sweep has rotated past this drone [0..2π)
+      // 0 = just swept → bright blip, π = half rotation ago → dim
+      float anglePast = fract((sweepAngle - droneAngle) / 6.28318 + 100.0) * 6.28318;
+      float phase = anglePast / 6.28318; // [0, 1)
+
+      // Bright blip right after sweep passes, exponential decay over ~80% of rotation (slower fade)
+      float blipIntensity = exp(-phase * 4.5);
+      // Minimum visibility so dots aren't invisible for long stretches
+      float minVisibility = 0.1;
+      float dronePulse = mix(minVisibility, 1.0, blipIntensity);
+
       vec2 diff = worldPos - dPos;
       vec2 uvDiff = diff / (uWorldRadius * 2.0);
       float dDist = length(uvDiff);
@@ -113,14 +130,13 @@ export const fragmentShader = /* glsl */ `
       float dotSize = 0.012;
       float dotCircle = smoothstep(dotSize, dotSize - 0.004, dDist);
 
-      // Glow halo
+      // Glow halo (also fades with sweep)
       float glow = exp(-dDist * 80.0) * 0.6;
 
       vec3 droneColor = state < 0.5
         ? vec3(1.0, 0.95, 0.0)   // yellow = taking off
         : vec3(1.0, 0.08, 0.0);  // red = patrolling
 
-      float dronePulse = sin(uTime * 5.0 + float(i) * 2.0) * 0.3 + 0.7;
       bg += droneColor * (dotCircle * 1.0 + glow) * dronePulse;
     }
 
