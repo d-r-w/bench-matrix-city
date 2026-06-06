@@ -79,10 +79,7 @@ export function createDefenseButton(): HTMLButtonElement {
       mouseNDC.x = 0;
       mouseNDC.y = 0;
     } else {
-      // Capture yaw/pitch from camera for smooth transition
-      const dir = new THREE.Vector3();
-      // We need the camera — use a stored reference or pass it differently.
-      // Handled via setDefenseYawPitch below called from main.ts
+      // Yaw/pitch capture handled via setDefenseYawPitch called from main.ts
       currentMode = "defense";
 
       if (!mouseMoveHandler) {
