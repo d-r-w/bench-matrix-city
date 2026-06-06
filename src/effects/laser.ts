@@ -9,6 +9,7 @@ import {
   fragmentShader as haloFragment,
   vertexShader as haloVertex,
 } from "../shaders/laser/halo.js";
+import { recordBuildingHit, recordDroneHit, recordShot } from "../ui/combat-log.js";
 import { destroyDrone } from "../vehicles/drone-manager.js";
 import { registerDeadSpot } from "./dead-spots.js";
 import { spawnExplosion } from "./explosion.js";
@@ -144,6 +145,9 @@ export function fireLaser(camera: THREE.PerspectiveCamera, ndcX: number, ndcY: n
 
   activeLasers.push(laser);
 
+  // Track shot fired for combat telemetry
+  recordShot();
+
   // Add to scene via global reference
   const scene = getScene();
   if (scene) {
@@ -182,6 +186,7 @@ export function updateLasers(dt: number, elapsed: number): void {
       if (buildingHit) {
         spawnExplosion(scene, buildingHit.point, buildingHit.normal);
         registerDeadSpot(buildingHit.point);
+        recordBuildingHit();
         laser.hasExploded = true;
         laser.collisionLife = laser.life;
       } else {
@@ -205,6 +210,7 @@ export function updateLasers(dt: number, elapsed: number): void {
             shakeIntensity: 1.5,
           });
           destroyDrone(droneHit.drone, elapsed);
+          recordDroneHit();
           laser.hasExploded = true;
           laser.collisionLife = laser.life;
         }

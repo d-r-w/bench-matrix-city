@@ -30,6 +30,7 @@ import {
   fragmentShader as vignetteFragment,
   vertexShader as vignetteVertex,
 } from "./shaders/vignette.js";
+import { buildCombatTelemetry, updateCombatTelemetry } from "./ui/combat-log.js";
 // UI
 import {
   buildRadar,
@@ -105,6 +106,9 @@ function init(): void {
 
   // ── Radar minimap overlay ────────────────────────────────
   buildRadar(scene);
+
+  // ── Combat telemetry HUD panel ───────────────────────────
+  buildCombatTelemetry();
 
   // ── Scene effects ────────────────────────────────────────
   buildGroundGrid(scene);
@@ -208,6 +212,9 @@ function animate(): void {
 
   // Explosion / impact effects
   updateExplosions(dt, t);
+
+  // Combat telemetry HUD display
+  updateCombatTelemetry();
 
   // Radar minimap billboard + uniforms
   updateRadar(camera, t);

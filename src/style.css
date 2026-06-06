@@ -441,3 +441,131 @@ canvas {
 .pip-container.minimized .pip-iframe-wrapper {
   display: none;
 }
+
+/* ── Combat Telemetry HUD Panel ─────────────────────────────── */
+
+#combat-telemetry {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 300;
+  width: 240px;
+  background: rgba(0, 8, 2, 0.75);
+  border: 1px solid #0f04;
+  border-radius: 4px;
+  padding: 10px 14px;
+  font-family: monospace;
+  backdrop-filter: blur(6px);
+}
+
+.ct-header {
+  color: #0f0;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-align: center;
+  margin-bottom: 8px;
+  text-shadow:
+    0 0 6px rgba(0, 255, 65, 0.6),
+    0 0 14px rgba(0, 255, 65, 0.3);
+}
+
+.ct-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
+.ct-label {
+  color: #0a0;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 4px rgba(0, 255, 65, 0.3);
+}
+
+.ct-value {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+.ct-shots {
+  color: #0f0;
+  text-shadow:
+    0 0 6px rgba(0, 255, 65, 0.7),
+    0 0 14px rgba(0, 255, 65, 0.3);
+}
+
+.ct-drones-pct {
+  color: #0f0;
+  text-shadow:
+    0 0 6px rgba(0, 255, 65, 0.7),
+    0 0 14px rgba(0, 255, 65, 0.3);
+}
+
+.ct-buildings-pct {
+  color: #f44;
+  text-shadow:
+    0 0 6px rgba(255, 68, 68, 0.7),
+    0 0 14px rgba(255, 68, 68, 0.3);
+}
+
+.ct-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    #0f04 20%,
+    #0f08 50%,
+    #0f04 80%,
+    transparent 100%
+  );
+  margin: 6px 0;
+}
+
+.ct-section {
+  margin-bottom: 2px;
+}
+
+.ct-bar-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(0, 255, 65, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 3px;
+}
+
+.ct-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ct-bar-green {
+  background: linear-gradient(90deg, #0a0, #0f0);
+  box-shadow:
+    0 0 6px rgba(0, 255, 65, 0.6),
+    0 0 12px rgba(0, 255, 65, 0.3);
+}
+
+.ct-bar-red {
+  background: linear-gradient(90deg, #a00, #f44);
+  box-shadow:
+    0 0 6px rgba(255, 68, 68, 0.6),
+    0 0 12px rgba(255, 68, 68, 0.3);
+}
+
+.ct-bar-pulse {
+  animation: ctBarPulse 0.4s ease-out;
+}
+
+@keyframes ctBarPulse {
+  0% {
+    filter: brightness(2.5);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
