@@ -16,7 +16,7 @@ import { updateAntennas } from "./city/geometry/antenna.js";
 import { updateWindowMeshes } from "./city/geometry/window-grid.js";
 import { updateMatrixMesh } from "./city/instanced-mesh.js";
 import { updateCameraShake } from "./effects/camera-shake.js";
-import { applyDeadSpots } from "./effects/dead-spots.js";
+import { applyDeadSpotsToGlyphs, applyDeadSpotsToWindows } from "./effects/dead-spots.js";
 import { updateExplosions } from "./effects/explosion.js";
 // Effects
 import { buildGroundGrid, updateGroundGrid, updateStreamSprites } from "./effects/ground-grid.js";
@@ -167,7 +167,12 @@ function animate(): void {
   // Matrix character mesh (char refresh/decay animation)
   if (window._matrixInstancedMesh) {
     updateMatrixMesh(window._matrixInstancedMesh, dt, t);
-    applyDeadSpots(window._matrixInstancedMesh);
+    applyDeadSpotsToGlyphs(window._matrixInstancedMesh);
+  }
+
+  // Dead spots on window grid meshes
+  if (window._windowMeshes) {
+    applyDeadSpotsToWindows(window._windowMeshes);
   }
 
   // Ground grid time uniform
