@@ -37,9 +37,12 @@ export function createSteerButton(camera: THREE.PerspectiveCamera): HTMLButtonEl
   document.body.appendChild(btn);
 
   btn.addEventListener("click", () => {
-    if (currentMode === "defense") return; // ignore while in defense mode
-
-    if (currentMode === "normal") {
+    if (currentMode === "free") {
+      currentMode = "normal";
+      mouseNDC.x = 0;
+      mouseNDC.y = 0;
+    } else {
+      // Enter free mode from either normal or defense
       currentMode = "free";
       freePos.copy(camera.position);
 
@@ -55,10 +58,6 @@ export function createSteerButton(camera: THREE.PerspectiveCamera): HTMLButtonEl
         };
         document.addEventListener("mousemove", mouseMoveHandler);
       }
-    } else {
-      currentMode = "normal";
-      mouseNDC.x = 0;
-      mouseNDC.y = 0;
     }
 
     btn.classList.toggle("active", currentMode === "free");
