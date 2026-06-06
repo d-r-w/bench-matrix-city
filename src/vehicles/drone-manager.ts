@@ -112,7 +112,7 @@ export function buildPoliceDrones(scene: THREE.Scene, spawnPoints: DroneSpawnPoi
 
     const drone = createPoliceDrone();
     const curve = validRoutes[i % validRoutes.length];
-    const speed = 0.00008 + Math.random() * 0.00006;
+    const speed = 0.00004 + Math.random() * 0.00003;
     const dir = i % 2 === 0 ? 1 : -1;
 
     // Pick a random building rooftop as takeoff point
@@ -153,7 +153,7 @@ export function destroyDrone(drone: THREE.Group, elapsed: number): void {
 
   destroyedDrones.push({
     curve: ud.curve,
-    speed: ud.speed ?? 0.0001,
+    speed: ud.speed ?? 0.00005,
     dir: ud.dir ?? 1,
     blinkPhase: ud.blinkPhase ?? 0,
     destroyedAt: elapsed,

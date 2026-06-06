@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { CELL, GRID } from "../constants.js";
 import type { BuildingHeight } from "../types.js";
+import { ArcLengthCurve } from "./arc-length.js";
 
 // ── Steering modes ────────────────────────────────────────────
 
@@ -15,9 +16,11 @@ let freePitch = 0;
 const freeSpeed = 1; // world units / sec
 
 // Defense mode state (set once when entering)
-let defenseCurve: THREE.CatmullRomCurve3 | null = null;
-let defenseT = 0;
-const defenseSpeed = 0.00025; // curve param speed
+let defenseArcCurve: ArcLengthCurve | null = null;
+let defenseDistance = 0;
+
+// Shared flythrough speed in world units per second
+const FLY_SPEED = 2; // world units / sec
 
 export function getCurrentMode(): SteeringMode {
   return currentMode;
@@ -137,9 +140,8 @@ export function startDroneFlythrough(
   addSegment("z", 0, -4, 0, 2);
   addSegment("x", 0, 0, -6, -2);
 
-  const normalCurve = new THREE.CatmullRomCurve3(waypoints, true);
-  let normalT = 0;
-  const baseSpeed = 0.00015;
+  const normalArcCurve = new ArcLengthCurve(new THREE.CatmullRomCurve3(waypoints, true));
+  let normalDistance = 0;
 
   // ── Defense-mode patrol path (around city perimeter) ───
   if (buildingHeights.length > 0) {
@@ -172,7 +174,7 @@ export function startDroneFlythrough(
       new THREE.Vector3(patrolX1, patrolY, patrolZ1), // NE
       new THREE.Vector3(patrolX0, patrolY, patrolZ1), // NW
     ];
-    defenseCurve = new THREE.CatmullRomCurve3(dPts, true);
+    defenseArcCurve = new ArcLengthCurve(new THREE.CatmullRomCurve3(dPts, true));
   }
 
   // ── Shared smoothed state ───────────────────────────────
@@ -228,14 +230,15 @@ export function startDroneFlythrough(
       const yawDelta = -mouseNDC.x * steerRate;
       smoothBank += (yawDelta * 0.15 - smoothBank) * 0.1;
       camera.rotateZ(smoothBank);
-    } else if (currentMode === "defense" && defenseCurve) {
+    } else if (currentMode === "defense" && defenseArcCurve) {
       // ── Defense mode: drone follows patrol path, camera orbits city center ──
 
-      defenseT = (defenseT + defenseSpeed) % 1;
-      const curvePoint = defenseCurve.getPointAt(defenseT);
+      const totalLen = defenseArcCurve.length;
+      defenseDistance = (defenseDistance + FLY_SPEED * dtSec) % totalLen;
+      const f = defenseDistance / totalLen;
 
       // Drone position lerps toward patrol path point
-      _posTarget.copy(curvePoint);
+      _posTarget.copy(defenseArcCurve.getPointAt(f));
       camera.position.lerp(_posTarget, 0.08);
 
       // Camera always looks down at the city center (origin)
@@ -243,28 +246,21 @@ export function startDroneFlythrough(
       camera.lookAt(lookDown);
 
       // Subtle banking from path curvature
-      const p1 = defenseCurve.getPointAt(defenseT);
-      const p2 = defenseCurve.getPointAt((defenseT + 0.01) % 1);
-      const p3 = defenseCurve.getPointAt((defenseT + 0.02) % 1);
-      const v1 = new THREE.Vector3().subVectors(p2, p1).normalize();
-      const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
-      const cross = new THREE.Vector3().crossVectors(v1, v2);
-
-      let rawBank = cross.y * 0.3;
-      rawBank = Math.max(-0.2, Math.min(0.2, rawBank));
-      smoothBank += (rawBank - smoothBank) * 0.08;
+      smoothBank += (defenseArcCurve.getBankingAt(f, 0.3) - smoothBank) * 0.08;
       camera.rotateZ(smoothBank);
     } else {
       // ── Normal curve flythrough ──
-      normalT = (normalT + baseSpeed) % 1;
+      const totalLen = normalArcCurve.length;
+      normalDistance = (normalDistance + FLY_SPEED * dtSec) % totalLen;
+      const f = normalDistance / totalLen;
 
-      const curvePoint = normalCurve.getPointAt(normalT);
-      _posTarget.copy(curvePoint);
+      _posTarget.copy(normalArcCurve.getPointAt(f));
       camera.position.lerp(_posTarget, 0.1);
 
-      // Look-ahead along curve
-      const lookT = (normalT + 0.04) % 1;
-      _lookTarget.lerp(normalCurve.getPointAt(lookT), 0.08);
+      // Look-ahead along curve (advance by LOOK_AHEAD_DIST world units)
+      const lookAheadDist = 8; // world units ahead
+      const lookF = ((normalDistance + lookAheadDist) % totalLen) / totalLen;
+      _lookTarget.lerp(normalArcCurve.getPointAt(lookF), 0.08);
       const midH = 20;
       if (camera.position.y > midH) {
         const excess = camera.position.y - midH;
@@ -275,17 +271,7 @@ export function startDroneFlythrough(
       camera.lookAt(_lookTarget);
 
       // Banking from curve curvature
-      const p1 = normalCurve.getPointAt(normalT);
-      const p2 = normalCurve.getPointAt((normalT + 0.01) % 1);
-      const p3 = normalCurve.getPointAt((normalT + 0.02) % 1);
-
-      const v1 = new THREE.Vector3().subVectors(p2, p1).normalize();
-      const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
-      const cross = new THREE.Vector3().crossVectors(v1, v2);
-
-      let rawBank = cross.y * 0.5;
-      rawBank = Math.max(-0.3, Math.min(0.3, rawBank));
-      smoothBank += (rawBank - smoothBank) * 0.1;
+      smoothBank += (normalArcCurve.getBankingAt(f, 0.5) - smoothBank) * 0.1;
       camera.rotateZ(smoothBank);
     }
 
