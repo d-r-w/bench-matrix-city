@@ -177,77 +177,78 @@ export function setupZoomToggle(camera: THREE.PerspectiveCamera): void {
   document.addEventListener("wheel", zoomWheel, { passive: false });
 }
 
-// ── Steer button DOM wiring ───────────────────────────────────
+// ── Mode button DOM wiring (PATROL / STEER / DEFENSE) ────────
 
 let mouseMoveHandler: ((e: MouseEvent) => void) | null = null;
+const modeButtons: HTMLButtonElement[] = [];
 
-export function createSteerButton(camera: THREE.PerspectiveCamera): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.id = "steer-toggle";
-  btn.textContent = "[ STEER ]";
-  document.body.appendChild(btn);
-
-  btn.addEventListener("click", () => {
-    if (currentMode === "free") {
-      currentMode = "normal";
-      mouseNDC.x = 0;
-      mouseNDC.y = 0;
-    } else {
-      // Enter free mode from either normal or defense
-      currentMode = "free";
-      freePos.copy(camera.position);
-
-      const dir = new THREE.Vector3();
-      camera.getWorldDirection(dir);
-      freeYaw = Math.atan2(-dir.x, -dir.z);
-      freePitch = Math.asin(dir.y);
-
-      if (!mouseMoveHandler) {
-        mouseMoveHandler = (e: MouseEvent) => {
-          mouseNDC.x = (e.clientX / innerWidth) * 2 - 1;
-          mouseNDC.y = -(e.clientY / innerHeight) * 2 + 1;
-        };
-        document.addEventListener("mousemove", mouseMoveHandler);
-      }
-    }
-
-    btn.classList.toggle("active", currentMode === "free");
-    btn.textContent = currentMode === "free" ? "[ FREE ]" : "[ STEER ]";
-  });
-
-  return btn;
+function updateModeButtons(): void {
+  for (const btn of modeButtons) {
+    const mode = btn.dataset.mode as SteeringMode;
+    btn.classList.toggle("active", currentMode === mode);
+  }
 }
 
-// ── Defense button DOM wiring ─────────────────────────────────
+export function createModeButtons(camera: THREE.PerspectiveCamera): HTMLButtonElement[] {
+  // Flex container bar so buttons never overlap
+  const bar = document.createElement("div");
+  bar.id = "mode-bar";
+  document.body.appendChild(bar);
 
-export function createDefenseButton(): HTMLButtonElement {
-  const btn = document.createElement("button");
-  btn.id = "defense-toggle";
-  btn.textContent = "[ DEFENSE ]";
-  document.body.appendChild(btn);
+  const modes: { label: string; mode: SteeringMode }[] = [
+    { label: "[ PATROL ]", mode: "normal" },
+    { label: "[ STEER ]", mode: "free" },
+    { label: "[ DEFENSE ]", mode: "defense" },
+  ];
 
-  btn.addEventListener("click", () => {
-    if (currentMode === "defense") {
-      currentMode = "normal";
+  for (const { label, mode } of modes) {
+    const btn = document.createElement("button");
+    btn.id = `${mode}-toggle`;
+    btn.textContent = label;
+    btn.dataset.mode = mode;
+    bar.appendChild(btn);
+    modeButtons.push(btn);
+
+    btn.addEventListener("click", () => {
+      if (currentMode === mode) return; // already in this mode, no-op
+
+      currentMode = mode;
       mouseNDC.x = 0;
       mouseNDC.y = 0;
-    } else {
-      // Yaw/pitch capture handled via setDefenseYawPitch called from main.ts
-      currentMode = "defense";
 
-      if (!mouseMoveHandler) {
+      if (mode === "free") {
+        freePos.copy(camera.position);
+
+        const dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        freeYaw = Math.atan2(-dir.x, -dir.z);
+        freePitch = Math.asin(dir.y);
+
+        if (!mouseMoveHandler) {
+          mouseMoveHandler = (e: MouseEvent) => {
+            mouseNDC.x = (e.clientX / innerWidth) * 2 - 1;
+            mouseNDC.y = -(e.clientY / innerHeight) * 2 + 1;
+          };
+          document.addEventListener("mousemove", mouseMoveHandler);
+        }
+      }
+
+      if (mode === "defense" && !mouseMoveHandler) {
         mouseMoveHandler = (e: MouseEvent) => {
           mouseNDC.x = (e.clientX / innerWidth) * 2 - 1;
           mouseNDC.y = -(e.clientY / innerHeight) * 2 + 1;
         };
         document.addEventListener("mousemove", mouseMoveHandler);
       }
-    }
 
-    btn.classList.toggle("active", currentMode === "defense");
-  });
+      updateModeButtons();
+    });
+  }
 
-  return btn;
+  // Set initial active state
+  updateModeButtons();
+
+  return modeButtons;
 }
 
 // ── Drone flythrough (normal + free + defense) ────────────────

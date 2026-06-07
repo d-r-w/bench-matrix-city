@@ -5,12 +5,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 // Camera
-import {
-  createDefenseButton,
-  createSteerButton,
-  setupZoomToggle,
-  startDroneFlythrough,
-} from "./camera/flythrough.js";
+import { createModeButtons, setupZoomToggle, startDroneFlythrough } from "./camera/flythrough.js";
 // City
 import { buildCity } from "./city/city-builder.js";
 import { updateAntennas } from "./city/geometry/antenna.js";
@@ -118,9 +113,8 @@ function init(): void {
   buildStarfield(scene);
   buildLightBeams(scene);
 
-  // ── Camera flythrough + steer/defense buttons ────────────
-  createSteerButton(camera);
-  createDefenseButton();
+  // ── Camera flythrough + mode buttons (PATROL / STEER / DEFENSE) ──
+  createModeButtons(camera);
   setupZoomToggle(camera);
 
   startDroneFlythrough(camera, buildingHeights);
@@ -132,13 +126,7 @@ function init(): void {
   document.addEventListener("click", (e: MouseEvent) => {
     // Ignore clicks on UI elements (PiP overlays, steer button)
     const target = e.target as HTMLElement;
-    if (
-      target.closest(".pip-container") ||
-      target.id === "steer-toggle" ||
-      target.closest("#steer-toggle") ||
-      target.id === "defense-toggle" ||
-      target.closest("#defense-toggle")
-    ) {
+    if (target.closest(".pip-container") || target.closest("#mode-bar")) {
       return;
     }
 
