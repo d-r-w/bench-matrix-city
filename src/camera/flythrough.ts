@@ -9,6 +9,15 @@ import { ArcLengthCurve } from "./arc-length.js";
 export type SteeringMode = "normal" | "free" | "defense";
 
 let currentMode: SteeringMode = "normal";
+
+// ── Zoom mode (press Z to toggle) ─────────────────────────────
+const BASE_FOV = 80;
+const ZOOM_FOV = BASE_FOV / 3; // ~26.7° — 3× zoom
+let zoomMode = false;
+let reticleEl: HTMLDivElement | null = null;
+let scanlineOverlay: HTMLDivElement | null = null;
+let keyDownHandler: ((e: KeyboardEvent) => void) | null = null;
+const mouseScreen = { x: innerWidth / 2, y: innerHeight / 2 }; // raw pixel coords
 const mouseNDC = { x: 0, y: 0 };
 const freePos = new THREE.Vector3();
 let freeYaw = 0;
@@ -24,6 +33,148 @@ const FLY_SPEED = 2; // world units / sec
 
 export function getCurrentMode(): SteeringMode {
   return currentMode;
+}
+
+// ── Zoom toggle (Z key) ───────────────────────────────────────
+
+function createReticle(): HTMLDivElement {
+  const el = document.createElement("div");
+  el.id = "zoom-reticle";
+  el.style.cssText = `
+    position: fixed; top: 0; left: 0; pointer-events: none; z-index: 9999;
+    width: 240px; height: 180px; transform: translate(-50%, -50%);
+  `;
+
+  const inner = document.createElement("div");
+  inner.style.cssText = `
+    position: relative; width: 240px; height: 180px;
+  `;
+
+  inner.innerHTML = `
+    <svg viewBox="0 0 240 180" xmlns="http://www.w3.org/2000/svg">
+      <!-- Corner brackets -->
+      <polyline points="20,50 20,20 50,20"
+        fill="none" stroke="#0f0" stroke-width="2.5" opacity="0.85"/>
+      <polyline points="220,50 220,20 190,20"
+        fill="none" stroke="#0f0" stroke-width="2.5" opacity="0.85"/>
+      <polyline points="20,130 20,160 50,160"
+        fill="none" stroke="#0f0" stroke-width="2.5" opacity="0.85"/>
+      <polyline points="220,130 220,160 190,160"
+        fill="none" stroke="#0f0" stroke-width="2.5" opacity="0.85"/>
+
+      <!-- Center crosshair -->
+      <line x1="120" y1="78" x2="120" y2="102"
+        stroke="#0f0" stroke-width="1.5" opacity="0.6"/>
+      <line x1="98" y1="90" x2="142" y2="90"
+        stroke="#0f0" stroke-width="1.5" opacity="0.6"/>
+
+      <!-- Center dot -->
+      <circle cx="120" cy="90" r="2" fill="#0f0" opacity="0.7"/>
+
+      <!-- Small tick marks on edges -->
+      <line x1="120" y1="38" x2="120" y2="46"
+        stroke="#0f0" stroke-width="1" opacity="0.4"/>
+      <line x1="120" y1="134" x2="120" y2="142"
+        stroke="#0f0" stroke-width="1" opacity="0.4"/>
+      <line x1="78" y1="90" x2="86" y2="90"
+        stroke="#0f0" stroke-width="1" opacity="0.4"/>
+      <line x1="154" y1="90" x2="162" y2="90"
+        stroke="#0f0" stroke-width="1" opacity="0.4"/>
+
+
+    </svg>
+  `;
+
+  el.appendChild(inner);
+  document.body.appendChild(el);
+  return el;
+}
+
+function updateReticlePosition(): void {
+  if (!reticleEl) return;
+
+  reticleEl.style.left = `${mouseScreen.x}px`;
+  reticleEl.style.top = `${mouseScreen.y}px`;
+
+  // Scanlines follow the reticle
+  if (scanlineOverlay) {
+    scanlineOverlay.style.left = `${mouseScreen.x}px`;
+    scanlineOverlay.style.top = `${mouseScreen.y}px`;
+  }
+}
+
+const RETICLE_HALF_SCALE = 0.5;
+
+function updateReticleScale(): void {
+  if (!reticleEl) return;
+  const scale = zoomMode ? 1 : RETICLE_HALF_SCALE;
+  reticleEl.style.transform = `translate(-50%, -50%) scale(${scale})`;
+}
+
+function toggleZoom(camera: THREE.PerspectiveCamera): void {
+  zoomMode = !zoomMode;
+
+  if (zoomMode) {
+    camera.fov = ZOOM_FOV;
+  } else {
+    camera.fov = BASE_FOV;
+  }
+  camera.updateProjectionMatrix();
+  updateReticleScale();
+}
+
+/** Wire up the Z-key zoom toggle. Call once after camera is created. */
+export function setupZoomToggle(camera: THREE.PerspectiveCamera): void {
+  keyDownHandler = (e: KeyboardEvent) => {
+    if (e.key === "z" || e.key === "Z") {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      toggleZoom(camera);
+    }
+  };
+  document.addEventListener("keydown", keyDownHandler);
+
+  // Full-screen scanlines crossing at the reticle position
+  scanlineOverlay = document.createElement("div");
+  scanlineOverlay.id = "scanline-overlay";
+  scanlineOverlay.style.cssText = `
+    position: fixed; top: 0; left: 0; pointer-events: none; z-index: 9998;
+    width: 200vw; height: 200vh; transform: translate(-50%, -50%);
+  `;
+  scanlineOverlay.innerHTML = `
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
+      <line x1="0" y1="50" x2="100" y2="50" stroke="#0f0" stroke-width="0.15" opacity="0.18"/>
+      <line x1="50" y1="0" x2="50" y2="100" stroke="#0f0" stroke-width="0.15" opacity="0.18"/>
+    </svg>
+  `;
+  document.body.appendChild(scanlineOverlay);
+
+  // Reticle is always visible, cursor always hidden
+  reticleEl = createReticle();
+  updateReticleScale();
+  updateReticlePosition();
+  document.body.style.cursor = "none";
+
+  // Track raw mouse position for reticle following
+  const zoomMouseMove = (e: MouseEvent) => {
+    mouseScreen.x = e.clientX;
+    mouseScreen.y = e.clientY;
+    updateReticlePosition();
+  };
+  document.addEventListener("mousemove", zoomMouseMove);
+
+  // Scroll wheel: up = zoom in, down = zoom out (no-op at limits)
+  const zoomWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY < 0 && !zoomMode) {
+      // scroll up → zoom in
+      toggleZoom(camera);
+    } else if (e.deltaY > 0 && zoomMode) {
+      // scroll down → zoom out
+      toggleZoom(camera);
+    }
+  };
+  document.addEventListener("wheel", zoomWheel, { passive: false });
 }
 
 // ── Steer button DOM wiring ───────────────────────────────────
@@ -184,6 +335,13 @@ export function startDroneFlythrough(
   const halfGrid = (GRID / 2) * CELL;
   const _forward = new THREE.Vector3();
 
+  // Defense-mode cursor raycast helpers (allocated once, reused per frame)
+  const _defenseRaycaster = new THREE.Raycaster();
+  const _groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // y=0
+  const _cursorWorld = new THREE.Vector3();
+  const _cityCenterFallback = new THREE.Vector3(0, 5, 0);
+  const _mouseVec2 = new THREE.Vector2();
+
   let lastFlyTime = performance.now();
 
   function fly(): void {
@@ -240,9 +398,24 @@ export function startDroneFlythrough(
       _posTarget.copy(defenseArcCurve.getPointAt(f));
       camera.position.lerp(_posTarget, 0.08);
 
-      // Camera always looks down at the city center (origin)
-      const lookDown = new THREE.Vector3(0, 5, 0);
-      camera.lookAt(lookDown);
+      // Camera looks at the world point under the cursor (raycast onto ground plane y=0)
+      _mouseVec2.set(mouseNDC.x, mouseNDC.y);
+      _defenseRaycaster.setFromCamera(_mouseVec2, camera);
+      const hit = _defenseRaycaster.ray.intersectPlane(_groundPlane, _cursorWorld);
+
+      // Clamp look target to grid bounds so camera doesn't swing wildly off-map
+      if (hit) {
+        _cursorWorld.x = Math.max(-halfGrid, Math.min(halfGrid, _cursorWorld.x));
+        _cursorWorld.z = Math.max(-halfGrid, Math.min(halfGrid, _cursorWorld.z));
+      }
+
+      // Lerp the look target smoothly so cursor movement feels controlled from altitude
+      if (hit) {
+        _lookTarget.lerp(_cursorWorld, 0.04);
+      } else {
+        _lookTarget.lerp(_cityCenterFallback, 0.04);
+      }
+      camera.lookAt(_lookTarget);
 
       // Subtle banking from path curvature
       smoothBank += (defenseArcCurve.getBankingAt(f, 0.3) - smoothBank) * 0.08;

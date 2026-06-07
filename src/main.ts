@@ -8,6 +8,7 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import {
   createDefenseButton,
   createSteerButton,
+  setupZoomToggle,
   startDroneFlythrough,
 } from "./camera/flythrough.js";
 // City
@@ -120,6 +121,7 @@ function init(): void {
   // ── Camera flythrough + steer/defense buttons ────────────
   createSteerButton(camera);
   createDefenseButton();
+  setupZoomToggle(camera);
 
   startDroneFlythrough(camera, buildingHeights);
 
